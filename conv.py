@@ -1,6 +1,5 @@
 
-from distutils.log import debug
-from multiprocessing.sharedctypes import Value
+
 
 
 def decimal_to_binary(decimal_number, width):
@@ -146,8 +145,8 @@ def gen_conv(
     code += indent + "case(mux)\n"
     for n,x in enumerate(ZERO_X):
         indent = "\t\t\t"
-        code += indent + "%d'b%s: zero_x <= zero_x%d;\n"%(MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
-    code += indent + "default: zero_x <= 0;\n"
+        code += indent + "%d'b%s: zero_x = zero_x%d;\n"%(MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
+    code += indent + "default: zero_x = 0;\n"
     indent = "\t\t"
     code += indent + "endcase\n"
     indent = "\t"
@@ -160,8 +159,8 @@ def gen_conv(
     code += indent + "case(mux)\n"
     for n,w in enumerate(ZERO_W):
         indent = "\t\t\t"
-        code += indent + "%d'b%s: zero_w <= zero_w%d;\n"%(MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
-    code += indent + "default: zero_w <= 0;\n"
+        code += indent + "%d'b%s: zero_w = zero_w%d;\n"%(MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
+    code += indent + "default: zero_w = 0;\n"
     indent = "\t\t"
     code += indent + "endcase\n"
     indent = "\t"
