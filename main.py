@@ -55,4 +55,4 @@ if __name__ == "__main__":
         QMAX=255,
         DEBUG=True                          # debug
     )
-    print(code)
+    # print(code)
