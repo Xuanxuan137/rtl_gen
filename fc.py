@@ -46,7 +46,6 @@ def gen_fc(
     ZERO_W: list,                       # zero_w
     ZERO_Y: list,                       # zero_y
     QMAX: int,                          # qmax
-    DO_RELU: bool,                      # 是否使用relu
     DEBUG=True,                         # 是否打印调试信息
 ):
 
@@ -425,14 +424,20 @@ def gen_fc(
     #   # t = t + zero_y
     code += indent + "t_add <= t + zero_y;\n"
     #   # relu
-    if(DO_RELU):
-        code += indent + "relu <= (t_add < zero_y) ? zero_y : \n"
-        code += indent + "        (t_add > qmax) ? qmax : \n"
-        code += indent + "        t_add;\n"
-    else:
-        code += indent + "relu <= (t_add < 0) ? 0 : \n"
-        code += indent + "        (t_add > qmax) ? qmax : \n"
-        code += indent + "        t_add;\n"
+    code += indent + "if(do_relu) begin\n"
+    indent = "\t\t\t\t"
+    code += indent + "relu <= (t_add < zero_y) ? zero_y : \n"
+    code += indent + "        (t_add > qmax) ? qmax : \n"
+    code += indent + "        t_add;\n"
+    indent = "\t\t\t"
+    code += indent + "end\n"
+    code += indent + "else begin\n"
+    indent = "\t\t\t\t"
+    code += indent + "relu <= (t_add < 0) ? 0 : \n"
+    code += indent + "        (t_add > qmax) ? qmax : \n"
+    code += indent + "        t_add;\n"
+    indent = "\t\t\t"
+    code += indent + "end\n"
     #  # output
     code += indent + "if(last_pipeline[%d]) begin\n"%(accumulate_time+7)
     indent = "\t\t\t\t"
