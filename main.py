@@ -8,6 +8,7 @@ import numpy as np
 import conv
 import fc
 import post_process
+import graph
 
 
 def analyse_resources(
@@ -55,6 +56,7 @@ def analyse_resources(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate RTL")
 
+    parser.add_argument("-m", "--model_dir", required=True, help="Input model directory")
     parser.add_argument("-p", "--part", required=True ,help="Project part, e.g. xc7z020clg400-1")
     parser.add_argument("--LUT", type=int, help="The number of LUT")
     parser.add_argument("--FF", type=int, help="The number of Flip Flop")
@@ -64,6 +66,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # 提取参数
+    model_dir = args.model_dir
     project_part = args.part
     lut = args.LUT
     ff = args.FF
@@ -84,6 +88,10 @@ if __name__ == "__main__":
         
     if(data_on_chip == False):
         raise ValueError("data_on_chip=False is not supported yet")
+    
+    # 读取计算图
+    graph = graph.read_calculation_graph(model_dir)
+    print(graph);exit()
 
     # 根据型号和片上资源分析buffer和计算单元使用方式
     analyse_result = analyse_resources(
