@@ -11,38 +11,19 @@ import post_process
 
 
 def analyse_resources(
-    part: str,
-    lut: int,
-    ff: int,
-    bram: int,
-    dsp: int,
+    PART: str,
+    LUT: int,
+    FF: int,
+    BRAM: int,
+    DSP: int,
 ):
     '''
-    此时假设只进行方阵计算
-    对于矩阵A，设希望提供的带宽为$8n$，则：
-    当$n<=64$时，A和B各需要n块BRAM
-    从1开始遍历n
-    A，B各占用n块bram。A的数据量为$(8n)^2=64n^2Bytes$，则C的数据量为A的4倍，即$256n^2Bytes$。
-    需要的bram数量为$256n^2B/36kb=256n^2B/4.5kB=256n^2/4608=ceil(n^2/18)$块
-    当$n>64\ and\ n<=128$时，由于深度超过了单块bram的极限512，所以矩阵的每8列都需要2块bram。
-    即便把所有列合在一起申请也是一样，因为为了保证带宽，就没法利用每块里空闲的空间。
-    所以A和B各需要2n块BRAM。C不变
-
-    综上：
-    A和B各需要的bram数为：
-    $$ceil(n/64)\times n$$
-    C需要的bram数为：
-    $$ceil(n^2/18)$$
-    按照
-    $$A+B+C<=[0.9*Total]$$
-    找到第一次决定的n
-    然后根据n判断计算资源是否足够
-    如果不够，则从n至1遍历，知道找到合适的n
+    见readme
     '''
     # 对于已经知道的芯片
-    if(part == "xc7z020clg400-1" or 
-       part == "xc7z020clg400-2" or
-       part == "xc7z020clg400-3"):
+    if(PART == "xc7z020clg400-1" or 
+       PART == "xc7z020clg400-2" or
+       PART == "xc7z020clg400-3"):
         result_dict = {}
         result_dict["A_bram_block_number"] = 32         # 在verilog创建的bram实例数
         result_dict["A_width_per_block"] = 64           # 创建bram时的宽度
@@ -53,11 +34,20 @@ def analyse_resources(
         result_dict["C_bram_block_number"] = 8
         result_dict["C_width_per_block"] = 64
         result_dict["C_depth_per_block"] = 4096
+        result_dict["accu_tree_width"] = 256            # 乘累加树宽度
         result_dict["max_matrix"] = 256                 # 支持的最大矩阵边长
         result_dict["min_matrix"] = 16                  # 支持的最小矩阵边长
         return result_dict
     
     # 对于未知的芯片
+    n = 1
+    while(True):
+        bram_a_need = int(math.ceil(n/64)) * n
+        bram_b_need = int(math.ceil(n/64)) * n
+        bram_c_need = int(math.ceil(n**2 / 18))
+        print(bram_a_need, bram_b_need, bram_c_need, bram_a_need + bram_b_need + bram_c_need)
+        if(bram_a_need + bram_b_need + bram_c_need > int(BRAM*0.9)):
+            break
 
 
 
@@ -66,11 +56,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate RTL")
 
     parser.add_argument("-p", "--part", required=True ,help="Project part, e.g. xc7z020clg400-1")
-    parser.add_argument("--LUT", help="The number of LUT")
-    parser.add_argument("--FF", help="The number of Flip Flop")
-    parser.add_argument("--BRAM", help="The number of BRAM")
-    parser.add_argument("--DSP", help="The number of DSP")
-    parser.add_argument("--data_on_chip", default=True, help="Put part of data on chip")
+    parser.add_argument("--LUT", type=int, help="The number of LUT")
+    parser.add_argument("--FF", type=int, help="The number of Flip Flop")
+    parser.add_argument("--BRAM", type=int, help="The number of BRAM")
+    parser.add_argument("--DSP", type=int, help="The number of DSP")
+    parser.add_argument("--data_on_chip", type=bool, default=True, help="Put part of data on chip")
 
     args = parser.parse_args()
 
