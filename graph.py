@@ -1,4 +1,5 @@
 
+from doctest import OutputChecker
 import numpy as np
 import op
 
@@ -16,6 +17,21 @@ name_op_map_dict = {
     "qconcat": op.QConcat,
     "nn.qavgpool2d": op.QAvgpool2d,
 }
+
+
+def get_id(line):
+    '''
+    从graph.txt的一行中提取算子id
+    '''
+    op_id = ""
+    n = 1
+    while(True):
+        if(line[n] == "="):
+            break
+        op_id += line[n]
+        n += 1
+    op_id = int(op_id)
+    return op_id
 
 
 def get_name(line):
@@ -73,7 +89,9 @@ def get_parameters(line):
 
 
 def read_calculation_graph(model_dir):
-    # 读取计算图
+    '''
+    从model_dir中读取计算图
+    '''
     if(model_dir[-1] != "/"):
         model_dir += "/"
     with open(model_dir + "graph.txt", "r") as f:
@@ -82,12 +100,14 @@ def read_calculation_graph(model_dir):
     graph = []
 
     for line in graph_txt_content:
-        line = line.replace("\n", "")
+        line = line.replace("\n", "").replace(" ", "")
+        op_id = get_id(line)
         op_name = get_name(line)
         op_parameters = get_parameters(line)
-        print(op_parameters)
         graph.append(
-            name_op_map_dict[op_name](op_parameters)
+            name_op_map_dict[op_name](op_id, op_parameters, model_dir)
         )
 
     return graph
+
+

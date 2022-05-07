@@ -2,3 +2,4 @@ __pycache__
 *.v
 output/
 *output/
+model/

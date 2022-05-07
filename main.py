@@ -9,6 +9,7 @@ import conv
 import fc
 import post_process
 import graph
+import analyser
 
 
 def analyse_resources(
@@ -90,8 +91,13 @@ if __name__ == "__main__":
         raise ValueError("data_on_chip=False is not supported yet")
     
     # 读取计算图
-    graph = graph.read_calculation_graph(model_dir)
-    print(graph);exit()
+    calculation_graph = graph.read_calculation_graph(model_dir)
+
+    # 推算im2col后矩阵尺寸
+    im2col_shape = analyser.infer_im2col_shape(calculation_graph)
+    for shape in im2col_shape:
+        print(shape, min(shape[0][0], shape[0][1], shape[1][0], shape[1][1]))
+    exit(0)
 
     # 根据型号和片上资源分析buffer和计算单元使用方式
     analyse_result = analyse_resources(
