@@ -1,7 +1,8 @@
 
-from doctest import OutputChecker
+
 import numpy as np
 import op
+from util import *
 
 
 name_op_map_dict = {
@@ -99,6 +100,7 @@ def read_calculation_graph(model_dir):
 
     graph = []
 
+    xxlog("Reading calculation graph")
     for line in graph_txt_content:
         line = line.replace("\n", "").replace(" ", "")
         op_id = get_id(line)
@@ -107,6 +109,8 @@ def read_calculation_graph(model_dir):
         graph.append(
             name_op_map_dict[op_name](op_id, op_parameters, model_dir)
         )
+        xxlog("Read op %%%s=%s from graph.txt"%(op_id, op_name))
+    xxlog("Read calculation graph finished")
 
     return graph
 

@@ -10,46 +10,7 @@ import fc
 import post_process
 import graph
 import analyser
-
-
-def analyse_resources(
-    PART: str,
-    LUT: int,
-    FF: int,
-    BRAM: int,
-    DSP: int,
-):
-    '''
-    见readme
-    '''
-    # 对于已经知道的芯片
-    if(PART == "xc7z020clg400-1" or 
-       PART == "xc7z020clg400-2" or
-       PART == "xc7z020clg400-3"):
-        result_dict = {}
-        result_dict["A_bram_block_number"] = 32         # 在verilog创建的bram实例数
-        result_dict["A_width_per_block"] = 64           # 创建bram时的宽度
-        result_dict["A_depth_per_block"] = 512          # 创建bram时的深度
-        result_dict["B_bram_block_number"] = 32
-        result_dict["B_width_per_block"] = 64
-        result_dict["B_depth_per_block"] = 512
-        result_dict["C_bram_block_number"] = 8
-        result_dict["C_width_per_block"] = 64
-        result_dict["C_depth_per_block"] = 4096
-        result_dict["accu_tree_width"] = 256            # 乘累加树宽度
-        result_dict["max_matrix"] = 256                 # 支持的最大矩阵边长
-        result_dict["min_matrix"] = 16                  # 支持的最小矩阵边长
-        return result_dict
-    
-    # 对于未知的芯片
-    n = 1
-    while(True):
-        bram_a_need = int(math.ceil(n/64)) * n
-        bram_b_need = int(math.ceil(n/64)) * n
-        bram_c_need = int(math.ceil(n**2 / 18))
-        print(bram_a_need, bram_b_need, bram_c_need, bram_a_need + bram_b_need + bram_c_need)
-        if(bram_a_need + bram_b_need + bram_c_need > int(BRAM*0.9)):
-            break
+from util import *
 
 
 
@@ -63,9 +24,13 @@ if __name__ == "__main__":
     parser.add_argument("--FF", type=int, help="The number of Flip Flop")
     parser.add_argument("--BRAM", type=int, help="The number of BRAM")
     parser.add_argument("--DSP", type=int, help="The number of DSP")
+    parser.add_argument("--BRAM_threshold", type=float, default=0.9, help="BRAM usage threshold")
+    parser.add_argument("--LUT_threshold", type=float, default=0.7, help="LUT usage threshold")
     parser.add_argument("--data_on_chip", type=bool, default=True, help="Put part of data on chip")
 
     args = parser.parse_args()
+    
+    clear_log()
 
     # 提取参数
     model_dir = args.model_dir
@@ -74,7 +39,19 @@ if __name__ == "__main__":
     ff = args.FF
     bram = args.BRAM
     dsp = args.DSP
+    bram_threshold = args.BRAM_threshold
+    lut_threshold = args.LUT_threshold
     data_on_chip = args.data_on_chip
+    xxlog("Read model_dir: %s"%(model_dir))
+    xxlog("Read project_part: %s"%(project_part))
+    xxlog("Read lut: %s"%(lut))
+    xxlog("Read ff: %s"%(ff))
+    xxlog("Read bram: %s"%(bram))
+    xxlog("Read dsp: %s"%(dsp))
+    xxlog("Read bram usage threshold: %s"%(bram_threshold))
+    xxlog("Read lut usage threshold: %s"%(lut_threshold))
+    xxlog("Read data_on_chip: %s"%(data_on_chip))
+
 
     known_parts = [
         "xc7z020clg400-1", "xc7z020clg400-2", "xc7z020clg400-3",
@@ -85,6 +62,7 @@ if __name__ == "__main__":
            ff is None or
            bram is None or
            dsp is None):
+            xxlog("Since part is Unknown, you must specify the number of LUT, FF, BRAM, DSP", XXError())
             raise ValueError("Since part is Unknown, you must specify the number of LUT, FF, BRAM, DSP")
         
     if(data_on_chip == False):
@@ -93,21 +71,37 @@ if __name__ == "__main__":
     # 读取计算图
     calculation_graph = graph.read_calculation_graph(model_dir)
 
+    # 如果未给定资源数量，则根据part设定资源数量
+    lut, ff, bram, dsp = analyser.set_resources(
+        project_part,
+        lut,
+        ff,
+        bram,
+        dsp
+    )
+
     # 推算im2col后矩阵尺寸
     im2col_shape = analyser.infer_im2col_shape(calculation_graph)
-    for shape in im2col_shape:
-        print(shape, min(shape[0][0], shape[0][1], shape[1][0], shape[1][1]))
-    exit(0)
 
-    # 根据型号和片上资源分析buffer和计算单元使用方式
-    analyse_result = analyse_resources(
+    # 第一次资源分析
+    analyse_result = analyser.analyse_resources_first_time(
         project_part,
         lut,
         ff,
         bram,
         dsp,
+        bram_threshold,
+        lut_threshold,
+        im2col_shape
     )
-    print(analyse_result);exit()
+    exit()
+
+
+
+
+
+
+
 
     code = conv.gen_conv(
         MODULE_NAME="conv",
