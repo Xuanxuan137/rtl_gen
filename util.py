@@ -24,7 +24,7 @@ def xxlog(msg: str, type=None):
         os.system("mkdir logs")
     if(type is None):
         type = "Info"
-    with open("logs/model_extract_log.log", "a") as f:
+    with open("logs/rtl_gen_log.log", "a") as f:
         string = "[%s-%s-%s %s:%s:%s] %s: "%(
             today.year, today.month, today.day, today.hour, today.minute, today.second,
             type

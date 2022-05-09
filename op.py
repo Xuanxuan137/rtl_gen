@@ -15,7 +15,7 @@ class QInput():
     
     def __str__(self):
         string = ""
-        string += "%%%d=qinput(shape=%s, dtype=%s);\n"%(self.id, self.shape, self.dtype)
+        string += "%%%d=qinput(shape=%s, dtype=%s);"%(self.id, self.shape, self.dtype)
         return string
 
 
@@ -52,7 +52,7 @@ class QConv2d():
         string = ""
         string += "%%%d=nn.qconv2d(input=%d, output_channel=%d, input_channel=%d, kernel_size=%s, " \
             "weight=%s, bias=%s, stride=%s, padding=%s, dilation=%s, output_shape=%s, zero_x=%d, "\
-            "zero_w=%d, zero_b=%d, zero_y=%d, coe=%f, rshift=%d, qmin=%d, qmax=%d);\n"%(
+            "zero_w=%d, zero_b=%d, zero_y=%d, coe=%f, rshift=%d, qmin=%d, qmax=%d);"%(
                 self.id, self.input, self.output_channel, self.input_channel, self.kernel_size,
                 self.weight.shape, self.bias.shape, self.stride, self.padding, self.dilation,
                 self.output_shape, self.zero_x, self.zero_w, self.zero_b, self.zero_y, 
@@ -80,7 +80,7 @@ class QMaxpool2d():
     def __str__(self):
         string = ""
         string += "%%%d=nn.qmaxpool2d(input=%d, kernel_size=%s, stride=%s, padding=%s, " \
-            "dilation=%s, output_shape=%s, zero=%d);\n"%(
+            "dilation=%s, output_shape=%s, zero=%d);"%(
                 self.id, self.input, self.kernel_size, self.stride, self.padding, self.dilation,
                 self.output_shape, self.zero
             )
@@ -102,7 +102,7 @@ class QRelu():
     
     def __str__(self):
         string = ""
-        string += "%%%d=nn.qrelu(input=%d, output_shape=%s, zero=%d, qmax=%d);\n"%(
+        string += "%%%d=nn.qrelu(input=%d, output_shape=%s, zero=%d, qmax=%d);"%(
             self.id, self.input, self.output_shape, self.zero, self.qmax
         )
         return string
@@ -121,7 +121,7 @@ class QFlatten():
     
     def __str__(self):
         string = ""
-        string += "%%%d=nn.qflatten(input=%d, output_shape=%s);\n"%(
+        string += "%%%d=nn.qflatten(input=%d, output_shape=%s);"%(
             self.id, self.input, self.output_shape
         )
         return string
@@ -156,7 +156,7 @@ class QDense():
         string = ""
         string += "%%%d=nn.qdense(input=%d, output_channel=%d, input_channel=%d, weight=%s, bias=%s, " \
             "output_shape=%s, zero_x=%d, zero_w=%d, zero_b=%d, zero_y=%d, coe=%f, rshift=%d, " \
-            "qmin=%d, qmax=%d);\n"%(
+            "qmin=%d, qmax=%d);"%(
                 self.id, self.input, self.output_channel, self.input_channel, self.weight.shape,
                 self.bias.shape, self.output_shape, self.zero_x, self.zero_w, self.zero_b, self.zero_y,
                 self.coe, self.rshift, self.qmin, self.qmax
@@ -178,7 +178,7 @@ class QDropout():
     
     def __str__(self):
         string = ""
-        string += "%%%d=nn.qdropout(input=%d, p=%f, output_shape=%s);\n"%(
+        string += "%%%d=nn.qdropout(input=%d, p=%f, output_shape=%s);"%(
             self.id, self.input, self.p, self.output_shape
         )
         return string
@@ -197,7 +197,7 @@ class QOutput():
     
     def __str__(self):
         string = ""
-        string += "%%%d=qoutput(input=%d, output_shape=%s);\n"%(
+        string += "%%%d=qoutput(input=%d, output_shape=%s);"%(
             self.id, self.input, self.output_shape
         )
         return string
@@ -227,7 +227,7 @@ class QAdd():
     def __str__(self):
         string = ""
         string += "%%%d=qadd(input1=%d, input2=%d, output_shape=%s, zero_x1=%d, zero_x2=%d, " \
-            "zero_y=%d, coe1=%f, coe2=%f, rshift1=%d, rshift2=%d, qmin=%d, qmax=%d);\n"%(
+            "zero_y=%d, coe1=%f, coe2=%f, rshift1=%d, rshift2=%d, qmin=%d, qmax=%d);"%(
                 self.id, self.input1, self.input2, self.output_shape, self.zero_x1, self.zero_x2,
                 self.zero_y, self.coe1, self.coe2, self.rshift1, self.rshift2, self.qmin, self.qmax
             )
@@ -259,7 +259,7 @@ class QConcat():
     def __str__(self):
         string = ""
         string += "%%%d=qconcat(input1=%d, input2=%d, dim=%d, output_shape=%d, zero_x1=%d, zero_x2=%d, " \
-            "zero_y=%d, coe1=%f, coe2=%f, rshift1=%d, rshift2=%d, qmin=%d, qmax=%d);\n"%(
+            "zero_y=%d, coe1=%f, coe2=%f, rshift1=%d, rshift2=%d, qmin=%d, qmax=%d);"%(
                 self.id, self.input1, self.input2, self.dim, self.output_shape, self.zero_x1, self.zero_x2,
                 self.zero_y, self.coe1, self.coe2, self.rshift1, self.rshift2, self.qmin, self.qmax
             )
@@ -283,7 +283,7 @@ class QAvgpool2d():
     
     def __str__(self):
         string = ""
-        string += "%%%d=nn.qavgpool2d(input=%d, kernel_size=%s, stride=%s, padding=%s, output_shape=%s, zero=%d"%(
+        string += "%%%d=nn.qavgpool2d(input=%d, kernel_size=%s, stride=%s, padding=%s, output_shape=%s, zero=%d);"%(
             self.id, self.input, self.kernel_size, self.stride, self.padding, self.output_shape, self.zero
         )
         return string

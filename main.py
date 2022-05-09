@@ -27,6 +27,8 @@ if __name__ == "__main__":
     parser.add_argument("--BRAM_threshold", type=float, default=0.9, help="BRAM usage threshold")
     parser.add_argument("--LUT_threshold", type=float, default=0.7, help="LUT usage threshold")
     parser.add_argument("--data_on_chip", type=bool, default=True, help="Put part of data on chip")
+    parser.add_argument("--try_increase_c_bandwidth", type=bool, default=True,
+        help="Try increase C bandwidth to improve performance, but may cause overuse of bram")
 
     args = parser.parse_args()
     
@@ -92,7 +94,8 @@ if __name__ == "__main__":
         dsp,
         bram_threshold,
         lut_threshold,
-        im2col_shape
+        im2col_shape,
+        calculation_graph
     )
     exit()
 
