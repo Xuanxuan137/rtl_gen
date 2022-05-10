@@ -1,5 +1,6 @@
 
 
+from email.parser import BytesParser
 import math
 from multiprocessing.sharedctypes import Value
 
@@ -216,15 +217,16 @@ def analyse_resources_first_time(
     max_len_per_group = 512     # 一组bram支持的最大矩阵边长
     width_per_bram = 64         # 使用的一块bram的宽度
     depth_per_bram = 512        # 一块bram的深度
+    bytes_per_bram_line = 8     # bram一行的字节数
     
     matrix_len = 8  # 支持的最大矩阵边长。不能小于8，因为一块bram就能支持8
     bram_group = 0  # 完整的512 bram组数
     while(True):
-        # 计算当前matrix_len需要的空间
+        # 计算当前matrix_len需要的空间，仅在512以下查找
         space_A_need = matrix_len * matrix_len
         space_B_need = matrix_len * matrix_len
-        bram_A_need = matrix_len // 8
-        bram_B_need = matrix_len // 8
+        bram_A_need = matrix_len // bytes_per_bram_line
+        bram_B_need = matrix_len // bytes_per_bram_line
         space_C_need = matrix_len * matrix_len * 4
         bram_C_need = int(math.ceil(space_C_need / space_per_bram))
         total_bram_need = bram_A_need + bram_B_need + bram_C_need
@@ -246,16 +248,20 @@ def analyse_resources_first_time(
         else:
             # 此时bram已经用超了，应该回退一步
             if(matrix_len == 8):
-                matrix_len = 0
+                xxlog("Device is too small to accelerate neural network", XXError())
+                raise ValueError("Device is too small to accelerate neural network")
             else:
                 matrix_len //= 2
-            bram_A_need = matrix_len // 8
-            bram_B_need = matrix_len // 8
+            bram_A_need = matrix_len // bytes_per_bram_line
+            bram_B_need = matrix_len // bytes_per_bram_line
             space_C_need = matrix_len * matrix_len * 4
             bram_C_need = int(math.ceil(space_C_need / space_per_bram))
             total_bram_need = bram_A_need + bram_B_need + bram_C_need
             break
-    
+
+    # 记录不完整组的长度
+    incomplete_bram_group_len = matrix_len
+
     if(bram_group >= 1):
         # 说明有完整的组，此时应该尝试给组翻倍
         xxlog("Found a complete group in first analyse: Bram usage: %d, " \
@@ -279,8 +285,28 @@ def analyse_resources_first_time(
     else:
         # 没有完整的组，分配结束
         xxlog("First analyse result: No complete group. Matrix_len: %d, " \
-            "bram usage: %d, bram avaliable: %d"%(matrix_len, 
+            "bram usage: %d, bram avaliable: %d"%(incomplete_bram_group_len, 
             total_bram_need, int(bram_threshold*bram)))
+    
+    '''
+    对完整的bram组进行4合1，并对应增大片上支持的最大矩阵边长，并计算支持的最小矩阵边长
+    '''
+    # 片上支持的最大矩阵
+    max_len_support = max_len_per_group if(bram_group >= 1) else incomplete_bram_group_len
+    if(bram_group >= 4):
+        xxlog("Try to merge 4 complete group into 1...")
+        while(bram_group >= 4):
+            # bram_group每4倍，最大矩阵边长2倍
+            bram_group //= 4
+            max_len_support *= 2
+        xxlog("Merge result: Group: %d. Max len support: %d"%(
+            bram_group, max_len_support))
+    # 片上支持的最小矩阵(保证最小矩阵至少能填满bram组的一行)
+    min_len_support = 8
+    while(min_len_support**2 < max_len_support):
+        min_len_support *= 2
+    xxlog("Min len support: %d"%(min_len_support))
+
     
     '''
     检查计算资源是否足够
@@ -289,13 +315,14 @@ def analyse_resources_first_time(
     lut_need_per_add = 8
     lut_need_per_sub = 8
     lut_counter_per_dsp = 25    # 每个dsp能够抵消的lut数量(估计值, 不一定准确)
-    total_mult = bram_group * max_len_per_group + matrix_len
-    total_add = bram_group * (max_len_per_group-1) + matrix_len-1
-    total_sub = bram_group * max_len_per_group * 2 + matrix_len * 2
+    total_mult = bram_group * max_len_support + incomplete_bram_group_len
+    total_add = bram_group * (max_len_support-1) + incomplete_bram_group_len-1
+    total_sub = bram_group * max_len_support * 2 + incomplete_bram_group_len * 2
     total_lut_need = (total_mult * lut_need_per_mult + 
         total_add * lut_need_per_add + total_sub * lut_need_per_sub)
     xxlog("Lut need(no consider dsp): %d. Lut avaliable: %d"%(
         total_lut_need, int(lut_threshold*lut)))
+
     
     calc_uint_per_bram_group = 1
     if(total_lut_need - lut_counter_per_dsp*dsp <= int(lut_threshold*lut)):
@@ -324,10 +351,21 @@ def analyse_resources_first_time(
         xxlog("Lut not enough, try to decrease...")
         solved = False
         # 尝试减少完整的bram组
-        while(bram_group > 1):
-            bram_group //= 2
-            total_lut_need //= 2
-            xxlog("Decrease bram group to %d"%(bram_group))
+        while(max_len_support > 512 or bram_group > 1):
+            if(bram_group == 1):
+                # 如果此时是一个大bram组，则拆成4个小的，然后减半
+                max_len_support //= 2
+                total_lut_need //= 2
+                bram_group = 2
+            elif(bram_group == 2):
+                # 如果此时是2个bram组，则减半。max_len_support不需要变
+                bram_group //= 2
+                total_lut_need //= 2
+            else:
+                xxlog("Wrong bram_group value: %d"%(bram_group), XXError())
+                raise ValueError("Wrong bram_group value")
+            xxlog("Decrease bram group to %d, max_len_support to: %d"%(
+                bram_group, max_len_support))
             if(total_lut_need - lut_counter_per_dsp*dsp <= int(lut_threshold*lut)):
                 solved = True
                 xxlog("Lut enough now, need:%d, avaliable:%d"%(
@@ -335,13 +373,10 @@ def analyse_resources_first_time(
                 break
         # 如果bram组不多余1组，尝试缩减最大矩阵边长
         if(not solved):
-            if(bram_group >= 1):
-                matrix_len = 512
-                bram_group = 0
-            while(matrix_len >= 8):
-                matrix_len //= 2
+            while(max_len_support >= 8):
+                max_len_support //= 2
                 total_lut_need //= 2
-                xxlog("Decrease matrix_len to %d"%(matrix_len))
+                xxlog("Decrease max_len_support to %d"%(max_len_support))
                 if(total_lut_need - lut_counter_per_dsp*dsp <= int(lut_threshold*lut)):
                     solved = True
                     xxlog("Lut enough now, need:%d, avaliable:%d"%(
@@ -352,32 +387,17 @@ def analyse_resources_first_time(
             xxlog("Device is too small to accelerate neural network", XXError())
             raise ValueError("Device is too small to accelerate neural network")
         # 解决后，重新计算bram需求
-        bram_A_need = matrix_len // 8
-        bram_B_need = matrix_len // 8
-        space_C_need = matrix_len * matrix_len * 4
+        bram_A_need = max_len_support // bytes_per_bram_line
+        bram_B_need = max_len_support // bytes_per_bram_line
+        space_C_need = max_len_support * max_len_support * 4
         bram_C_need = int(math.ceil(space_C_need / space_per_bram))
         total_bram_need = bram_A_need + bram_B_need + bram_C_need
-
     
-    # 片上支持的最大矩阵
-    max_len_support = max_len_per_group if(bram_group >= 1) else matrix_len
-    temp_bram_group = bram_group
-    while(True):
-        # bram_group每4倍，最大矩阵边长2倍
-        temp_bram_group //= 4
-        if(temp_bram_group >= 1):
-            max_len_support *= 2
-        else:
-            break
-    # 片上支持的最小矩阵(保证最小矩阵至少能填满bram组的一行)
-    min_len_support = 8
-    while(min_len_support**2 < max_len_support):
-        min_len_support *= 2
-
+    incomplete_bram_group_len = 0 if(bram_group >= 1) else max_len_support
     # 此时初次分配完成
     xxlog("First bram analyse and lut allocate finished, the result is " \
         "shown below:\n" \
-        "\tComplete bram group: %d\n" \
+        "\tComplete bram group(%d group): %d\n" \
         "\tIncomplete bram group len: %d\n" \
         "\tTotal bram need: %d\n" \
         "\tBram avaliable: %d\n" \
@@ -386,11 +406,12 @@ def analyse_resources_first_time(
         "\tCalculation unit per bram group: %d\n" \
         "\tTotal lut need: %d\n" \
         "\tLut avaliable: %d"%(
-            bram_group, matrix_len, total_bram_need, int(bram_threshold*bram),
-            max_len_support, min_len_support, calc_uint_per_bram_group, 
-            total_lut_need, int(lut_threshold*lut)
+            max_len_support, bram_group, incomplete_bram_group_len, 
+            total_bram_need, int(bram_threshold*bram), max_len_support, 
+            min_len_support, calc_uint_per_bram_group, total_lut_need, 
+            int(lut_threshold*lut)
         ))
-    
+
 
 
     '''
@@ -398,8 +419,9 @@ def analyse_resources_first_time(
     -- 拆分张量表达式
     对矩阵进行切块
     1. 尽量切大块，但不超过片上支持的最大边长
-    2. 矩阵的相乘边要为2的幂
-    3. 矩阵的结果边要为合适的长度，使得本矩阵块能够填满bram的一行
+    2. 最小边长不能小于片上支持的最小边长
+    3. 矩阵的相乘边要为2的幂
+    4. 矩阵的结果边要为合适的长度，使得本矩阵块能够填满bram的一行(由于前面三条的限制，本条一定能满足)
     得到切块结果
     '''
     while(True):
@@ -584,30 +606,27 @@ def analyse_resources_first_time(
             min_matrix_len = min(min_matrix_len, current_layer_min_matrix_len)
         xxlog("Min matrix block need to calculate is %d"%(min_matrix_len))
         # 每周期每组计算单元得到的结果数
-        result_per_cycle_per_calc_unit = max_len_support // min_matrix_len 
-        xxlog("Result get per cycle per calculation unit: %d"%(
-            result_per_cycle_per_calc_unit))
-        # 2. C所需要的bram数需要在1的基础上，再乘上每块里bram分配的计算单元组数。
-        # 每周期得到的结果数
-        result_per_cycle = result_per_cycle_per_calc_unit * calc_uint_per_bram_group
-        xxlog("Result per cycle: %d"%(result_per_cycle))
+        result_per_cycle_per_bram_group_per_calc_unit = max_len_support // min_matrix_len 
+        xxlog("Result get per cycle per bram group per calculation unit: %d"%(
+            result_per_cycle_per_bram_group_per_calc_unit))
+        # 2. 每个bram_group里C所需要的bram数需要在1的基础上，再乘上每块里bram分配的计算单元组数。
+        # 每组每周期得到的结果数
+        result_per_cycle_per_bram_group = (result_per_cycle_per_bram_group_per_calc_unit * 
+            calc_uint_per_bram_group)
+        xxlog("Result per cycle per bram group: %d"%(result_per_cycle_per_bram_group))
         # 3. 根据C需要的带宽计算C实际需要的bram数
         result_per_bram = 2 # 结果为32bit的条件下，每列bram每周期能写入的结果数
-        # C需要的bram列数
-        bram_col_C_need = result_per_cycle / result_per_bram 
-        xxlog("Bram col C need: %d"%(bram_col_C_need))
+        # 每个bram_group C需要的bram列数
+        bram_col_C_need_per_bram_group = result_per_cycle_per_bram_group // result_per_bram 
+        xxlog("Bram col C need per bram group: %d"%(bram_col_C_need_per_bram_group))
         # 每个bram_group C需要的空间
-        if(bram_group >= 1):
-            space_C_need_per_bram_group = 512 * 512 * 4
-            space_C_need = space_C_need_per_bram_group * bram_group
-        else:
-            space_C_need = max_len_support * max_len_support * 4
-        xxlog("Space C need: %d"%(space_C_need))
-        # C需要每列bram的空间
-        space_C_need_per_bram_col = space_C_need / bram_col_C_need
+        space_C_need_per_bram_group = max_len_support * max_len_support * 4
+        xxlog("Space C need per bram group: %d"%(space_C_need_per_bram_group))
+        # 每个bram_group C需要每列bram的空间
+        space_C_need_per_bram_col = space_C_need_per_bram_group // bram_col_C_need_per_bram_group
         xxlog("Space C need per bram col: %d"%(space_C_need_per_bram_col))
         # C需要每列bram的深度
-        depth_C_need_per_bram_col = space_C_need_per_bram_col / 8
+        depth_C_need_per_bram_col = space_C_need_per_bram_col // bytes_per_bram_line
         xxlog("Depth C need per bram col: %d"%(depth_C_need_per_bram_col))
         # C需要每列bram的个数(由于不知道xilinx bram的计算方式，这一步目前只能查表)
         bram36_C_need_per_col = get_bram_usage(width_per_bram, 
@@ -616,20 +635,29 @@ def analyse_resources_first_time(
             depth_C_need_per_bram_col)[1]
         xxlog("Bram36 C need per col: %d, bram18 C need per col: %d"%(
             bram36_C_need_per_col, bram18_C_need_per_col))
-        # C需要的bram个数
-        bram_C_need = (bram_col_C_need * bram36_C_need_per_col + 
-            int(math.ceil(bram_col_C_need * bram18_C_need_per_col / 2)))
-        xxlog("Bram C need: %d"%(bram_C_need))
-        # 总需要的bram个数
-        if(bram_group >= 1):
-            bram_A_need = bram_group * 64
-            bram_B_need = bram_group * 64
+        # 每个bram_group C需要的bram个数
+        bram_C_need_per_bram_group = (bram_col_C_need_per_bram_group * bram36_C_need_per_col + 
+            int(math.ceil(bram_col_C_need_per_bram_group * bram18_C_need_per_col / 2)))
+        xxlog("Bram C need per bram group: %d"%(bram_C_need_per_bram_group))
+        # 每个bram_group ABC总需要的bram个数
+        if(bram_group == 0):
+            bram_A_need_per_bram_group = max_len_support // bytes_per_bram_line
+            bram_B_need_per_bram_group = max_len_support // bytes_per_bram_line
         else:
-            bram_A_need = max_len_support // 8
-            bram_B_need = max_len_support // 8
-        xxlog("Bram A need: %d, Bram B need: %d"%(bram_A_need, bram_B_need))
-        total_bram_need = bram_A_need + bram_B_need + bram_C_need
-        xxlog("Total bram need: %d"%(total_bram_need))
+            bram_A_need_per_bram_group = ((max_len_support // bytes_per_bram_line) * 
+                (max_len_support // depth_per_bram))
+            bram_B_need_per_bram_group = ((max_len_support // bytes_per_bram_line) * 
+                (max_len_support // depth_per_bram))
+        xxlog("Bram A need per bram group: %d, Bram B need per bram group: %d"%(
+            bram_A_need_per_bram_group, bram_B_need_per_bram_group))
+        total_bram_need_per_bram_group = (bram_A_need_per_bram_group + 
+            bram_B_need_per_bram_group + bram_C_need_per_bram_group)
+        xxlog("Total bram need per bram group: %d"%(total_bram_need_per_bram_group))
+        # bram总数
+        if(bram_group == 0):
+            total_bram_need = total_bram_need_per_bram_group
+        else:
+            total_bram_need = total_bram_need_per_bram_group * bram_group
         
         # 如果C修正后bram仍然足够，则可以结束
         if(total_bram_need <= int(bram_threshold*bram)):
@@ -638,31 +666,49 @@ def analyse_resources_first_time(
         
         # C修正后，bram不足，对bram使用进行修正
         xxlog("Bram not enough after fixed C, try to decrease bram...")
-        if(bram_group > 1):
-            bram_group //= 2
+        if(max_len_support > 512 or bram_group > 1):
+            if(bram_group == 1):
+                bram_group = 2
+                max_len_support //= 2
+            elif(bram_group == 2):
+                bram_group //= 2
         elif(bram_group == 1):
             bram_group = 0
-            matrix_len = 512
-            matrix_len //= 2
+            max_len_support = 512
+            max_len_support //= 2
         else:
-            matrix_len //= 2
-        if(matrix_len < 8):
+            max_len_support //= 2
+        xxlog("Decrease bram_group to: %d, max_len_support to: %d"%(
+            bram_group, max_len_support))
+        if(max_len_support < 8):
             xxlog("Device is too small to accelerate neural network", XXError())
             raise ValueError("Device is too small to accelerate neural network")
-        bram_A_need = matrix_len // 8
-        bram_B_need = matrix_len // 8
-        space_C_need = matrix_len * matrix_len * 4
+        if(bram_group == 0):
+            bram_A_need_per_bram_group = max_len_support // bytes_per_bram_line
+            bram_B_need_per_bram_group = max_len_support // bytes_per_bram_line
+        else:
+            bram_A_need_per_bram_group = ((max_len_support // bytes_per_bram_line) * 
+                (max_len_support // depth_per_bram))
+            bram_B_need_per_bram_group = ((max_len_support // bytes_per_bram_line) * 
+                (max_len_support // depth_per_bram))
+        if(bram_group == 0):
+            bram_A_need = bram_A_need_per_bram_group
+            bram_B_need = bram_B_need_per_bram_group
+        else:
+            bram_A_need = bram_A_need_per_bram_group * bram_group
+            bram_B_need = bram_B_need_per_bram_group * bram_group
+        space_C_need = max_len_support * max_len_support * 4
         bram_C_need = int(math.ceil(space_C_need / space_per_bram))
         total_bram_need = bram_A_need + bram_B_need + bram_C_need
-        max_len_support = max_len_per_group if(bram_group >= 1) else matrix_len
         min_len_support = 8
         while(min_len_support**2 < max_len_support):
             min_len_support *= 2
         # 同时对lut使用进行修正
         xxlog("Divide bram usage by 2. Try to fix lut usage...")
-        total_mult = bram_group * max_len_per_group + matrix_len
-        total_add = bram_group * (max_len_per_group-1) + matrix_len-1
-        total_sub = bram_group * max_len_per_group * 2 + matrix_len * 2
+        incomplete_bram_group_len = 0 if(bram_group >= 1) else max_len_support
+        total_mult = bram_group * max_len_support + incomplete_bram_group_len
+        total_add = bram_group * (max_len_support-1) + incomplete_bram_group_len-1
+        total_sub = bram_group * max_len_support * 2 + incomplete_bram_group_len * 2
         total_lut_need = (total_mult * lut_need_per_mult + 
             total_add * lut_need_per_add + total_sub * lut_need_per_sub)
         xxlog("Lut need(no consider dsp): %d. Lut avaliable: %d"%(
@@ -690,6 +736,7 @@ def analyse_resources_first_time(
                             calc_uint_per_bram_group, total_lut_need, 
                             int(lut_threshold*lut)))
                     break
+        incomplete_bram_group_len = 0 if(bram_group >= 1) else max_len_support
         xxlog("Bram decrease and lut allocate finished, the result is " \
             "shown below:\n" \
             "\tComplete bram group: %d\n" \
@@ -701,35 +748,39 @@ def analyse_resources_first_time(
             "\tCalculation unit per bram group: %d\n" \
             "\tTotal lut need: %d\n" \
             "\tLut avaliable: %d"%(
-                bram_group, matrix_len, total_bram_need, int(bram_threshold*bram),
-                max_len_support, min_len_support, calc_uint_per_bram_group, 
-                total_lut_need, int(lut_threshold*lut)
+                bram_group, incomplete_bram_group_len, total_bram_need, 
+                int(bram_threshold*bram), max_len_support, min_len_support, 
+                calc_uint_per_bram_group, total_lut_need, int(lut_threshold*lut)
             ))
         xxlog("Check again...")
 
     # 返回结果
+    incomplete_bram_group_len = 0 if(bram_group >= 1) else max_len_support
     xxlog("Bram decrease and lut allocate finished, the result is " \
-            "shown below:\n" \
-            "\tComplete bram group: %d\n" \
-            "\tIncomplete bram group len: %d\n" \
-            "\tTotal bram need: %d\n" \
-            "\tBram avaliable: %d\n" \
-            "\tMax matrix len support: %d\n" \
-            "\tMin matrix len support: %d\n" \
-            "\tCalculation unit per bram group: %d\n" \
-            "\tTotal lut need: %d\n" \
-            "\tLut avaliable: %d"%(
-                bram_group, matrix_len, total_bram_need, int(bram_threshold*bram),
-                max_len_support, min_len_support, calc_uint_per_bram_group, 
-                total_lut_need, int(lut_threshold*lut)))
+        "shown below:\n" \
+        "\tComplete bram group: %d\n" \
+        "\tIncomplete bram group len: %d\n" \
+        "\tBram column C need per bram group: %d\n" \
+        "\tTotal bram need: %d\n" \
+        "\tBram avaliable: %d\n" \
+        "\tMax matrix len support: %d\n" \
+        "\tMin matrix len support: %d\n" \
+        "\tCalculation unit per bram group: %d\n" \
+        "\tTotal lut need: %d\n" \
+        "\tLut avaliable: %d"%(
+            bram_group, incomplete_bram_group_len, bram_col_C_need_per_bram_group, 
+            total_bram_need, int(bram_threshold*bram), max_len_support, min_len_support, 
+            calc_uint_per_bram_group, total_lut_need, int(lut_threshold*lut)
+            ))
+
     return {
-        "bram_group": bram_group,
-        "matrix_len": matrix_len,
-        "total_bram_need": total_bram_need,
-        "bram_avaliable": int(bram_threshold*bram),
-        "max_matrix_len_support": max_len_support,
-        "min_matrix_len_support": min_len_support,
-        "calc_unit_per_bram_group": calc_uint_per_bram_group,
-        "total_lut_need": total_lut_need,
-        "lut_avaliable": int(lut_threshold*lut)
+        "bram_group": bram_group,   # bram组数(组边长小于512时，此值为0)
+        "bram_col_c_need_per_bram_group": bram_col_C_need_per_bram_group,   # 每组bram中C的列数
+        "total_bram_need": total_bram_need,     # 所需要的总的bram数
+        "bram_avaliable": int(bram_threshold*bram), # 可用的bram数
+        "max_matrix_len_support": max_len_support,  # 支持的最大矩阵(也即bram组的边长)
+        "min_matrix_len_support": min_len_support,  # 支持的最小矩阵
+        "calc_unit_per_bram_group": calc_uint_per_bram_group,   # 每组bram分配的计算单元组数
+        "total_lut_need": total_lut_need,           # 需要的总lut数
+        "lut_avaliable": int(lut_threshold*lut)     # 可用的lut数
     }

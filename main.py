@@ -86,7 +86,7 @@ if __name__ == "__main__":
     im2col_shape = analyser.infer_im2col_shape(calculation_graph)
 
     # 第一次资源分析
-    analyse_result = analyser.analyse_resources_first_time(
+    first_analyse_result = analyser.analyse_resources_first_time(
         project_part,
         lut,
         ff,
@@ -97,6 +97,13 @@ if __name__ == "__main__":
         im2col_shape,
         calculation_graph
     )
+    
+    # 第一次拆分张量表达式
+    first_tensor_expression = analyser.split_tensor_expression_first_time(
+        first_analyse_result,
+        im2col_shape,
+    )
+
     exit()
 
 
