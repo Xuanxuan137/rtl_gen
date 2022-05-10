@@ -761,6 +761,7 @@ def analyse_resources_first_time(
         "\tComplete bram group: %d\n" \
         "\tIncomplete bram group len: %d\n" \
         "\tBram column C need per bram group: %d\n" \
+        "\tDepth C need per bram col: %d\n" \
         "\tTotal bram need: %d\n" \
         "\tBram avaliable: %d\n" \
         "\tMax matrix len support: %d\n" \
@@ -769,13 +770,15 @@ def analyse_resources_first_time(
         "\tTotal lut need: %d\n" \
         "\tLut avaliable: %d"%(
             bram_group, incomplete_bram_group_len, bram_col_C_need_per_bram_group, 
-            total_bram_need, int(bram_threshold*bram), max_len_support, min_len_support, 
-            calc_uint_per_bram_group, total_lut_need, int(lut_threshold*lut)
+            depth_C_need_per_bram_col, total_bram_need, int(bram_threshold*bram), 
+            max_len_support, min_len_support, calc_uint_per_bram_group, 
+            total_lut_need, int(lut_threshold*lut)
             ))
 
     return {
         "bram_group": bram_group,   # bram组数(组边长小于512时，此值为0)
         "bram_col_c_need_per_bram_group": bram_col_C_need_per_bram_group,   # 每组bram中C的列数
+        "depth_c_need_per_bram_col": depth_C_need_per_bram_col,     # C需要的bram深度
         "total_bram_need": total_bram_need,     # 所需要的总的bram数
         "bram_avaliable": int(bram_threshold*bram), # 可用的bram数
         "max_matrix_len_support": max_len_support,  # 支持的最大矩阵(也即bram组的边长)
@@ -784,3 +787,226 @@ def analyse_resources_first_time(
         "total_lut_need": total_lut_need,           # 需要的总lut数
         "lut_avaliable": int(lut_threshold*lut)     # 可用的lut数
     }
+
+
+def split_tensor_expression_first_time(
+    first_analyse_result,
+    im2col_shape,
+    calculation_graph
+):
+    '''
+    第一次拆分张量表达式
+    3. 第一次拆分张量表达式
+    对矩阵进行切块
+    1. 尽量切大块，但不超过片上支持的最大边长
+    2. 矩阵的相乘边要为2的幂
+    3. 矩阵的结果边要为合适的长度，使得本矩阵块能够填满bram的一行
+    '''
+    xxlog("Split tensor expression first time")
+
+    # 从第一次分析结果中读取max_len_support和min_len_support
+    max_len_support = first_analyse_result["max_matrix_len_support"]
+    min_len_support = first_analyse_result["min_matrix_len_support"]
+    xxlog("max len support: %d, min len support: %d"%(
+        max_len_support, min_len_support))
+    xxlog("Try to split matrix block with len between %d and %d"%(
+        max_len_support, min_len_support))
+    
+    # 切分矩阵
+    original_shape = []
+    xxlog("Copy im2col_shape to original_shape...")
+    for shape in im2col_shape:
+        original_shape.append(([shape[0][0], shape[0][1]], 
+            [shape[1][0], shape[1][1]]))
+    divided_border = []     # 切分结果
+    xxlog("Divide im2col matrix...")
+    for n, shape in enumerate(original_shape):
+        xxlog("Dividing conv2d layer %d: %s"%(
+            n, search_conv2d(calculation_graph, n+1)))
+        xxlog("Currect layer shape: %s, %s"%(shape[0], shape[1]))
+        height_A = shape[0][0]
+        width_A = shape[0][1]
+        height_B = shape[1][0]
+        width_B = shape[1][1]
+        start_h_A = 0
+        start_w_A = 0
+        start_h_B = 0
+        start_w_B = 0
+        current_layer_divided_border_A = []
+        current_layer_divided_border_B = []
+        # A和b是分别切分的。除了相乘边需要保持一致外，其他边不需要一致。
+        # 先切分A
+        while(True):
+            if(height_A - start_h_A >= max_len_support and
+                width_A - start_w_A >= max_len_support):
+                # 如果足够切出来最大的块
+                cut_height = max_len_support
+                cut_width = max_len_support
+            else:
+                # 如果不足够切出来最大的块
+                if(height_A - start_h_A < max_len_support and
+                    width_A - start_w_A < max_len_support):
+                    # 如果height和width都不够
+                    cut_height = fit_to_power_of_2(
+                        height_A - start_h_A, min_len_support)
+                    cut_width = fit_to_power_of_2(
+                        width_A - start_w_A, min_len_support)
+                elif(height_A - start_h_A < max_len_support):
+                    # 如果height不够
+                    cut_height = fit_to_power_of_2(
+                        height_A - start_h_A, min_len_support)
+                    cut_width = max_len_support
+                elif(width_A - start_w_A < max_len_support):
+                    # 如果width不够
+                    cut_height = max_len_support
+                    cut_width = fit_to_power_of_2(
+                        width_A - start_w_A, min_len_support)
+                else:
+                    xxlog("Error when dividing matrix: height_A:%d, " \
+                        "start_h_A:%d, width_A:%d, start_w_A:%d, " \
+                        "max_len_support:%d"%(height_A, start_h_A, width_A, 
+                        start_w_A, max_len_support), XXError())
+                    raise ValueError("Error when dividing matrix")
+            # 保存切分结果
+            current_layer_divided_border_A.append(
+                [start_h_A, start_h_A+cut_height, start_w_A, start_w_A+cut_width]
+            )
+            xxlog("Cut [%d:%d, %d:%d] from A"%(
+                current_layer_divided_border_A[-1][0], 
+                current_layer_divided_border_A[-1][1],
+                current_layer_divided_border_A[-1][2],
+                current_layer_divided_border_A[-1][3]))
+            # 修改下一次切分起始点
+            if(start_w_A + cut_width >= width_A):
+                # width方向达到最大值，需要换行
+                if(start_h_A + cut_height >= height_A):
+                    # 如果height方向也达到最大值，结束
+                    break
+                else:
+                    start_h_A += cut_height
+                    start_w_A = 0
+            else:
+                start_w_A += cut_width
+        # 再切分B
+        while(True):
+            if(height_B - start_h_B >= max_len_support and
+                width_B - start_w_B >= max_len_support):
+                # 如果足够切出来最大的块
+                cut_height = max_len_support
+                cut_width = max_len_support
+            else:
+                # 如果不足够切出来最大的块
+                if(height_B - start_h_B < max_len_support and
+                    width_B - start_w_B < max_len_support):
+                    # 如果height和width都不够
+                    cut_height = fit_to_power_of_2(
+                        height_B - start_h_B, min_len_support)
+                    cut_width = fit_to_power_of_2(
+                        width_B - start_w_B, min_len_support)
+                elif(height_B - start_h_B < max_len_support):
+                    # 如果height不够
+                    cut_height = fit_to_power_of_2(
+                        height_B - start_h_B, min_len_support)
+                    cut_width = max_len_support
+                elif(width_B - start_w_B < max_len_support):
+                    # 如果width不够
+                    cut_height = max_len_support
+                    cut_width = fit_to_power_of_2(
+                        width_B - start_w_B, min_len_support)
+                else:
+                    xxlog("Error when dividing matrix: height_B:%d, " \
+                        "start_h_B:%d, width_B:%d, start_w_B:%d, " \
+                        "max_len_support:%d"%(height_B, start_h_B, width_B, 
+                        start_w_B, max_len_support), XXError())
+                    raise ValueError("Error when dividing matrix")
+            # 保存切分结果
+            current_layer_divided_border_B.append(
+                [start_h_B, start_h_B+cut_height, start_w_B, start_w_B+cut_width]
+            )
+            xxlog("Cut [%d:%d, %d:%d] from B"%(
+                current_layer_divided_border_B[-1][0], 
+                current_layer_divided_border_B[-1][1],
+                current_layer_divided_border_B[-1][2],
+                current_layer_divided_border_B[-1][3]))
+            # 修改下一次切分起始点
+            if(start_w_B + cut_width >= width_B):
+                # width方向达到最大值，需要换行
+                if(start_h_B + cut_height >= height_B):
+                    # 如果height方向也达到最大值，结束
+                    break
+                else:
+                    start_h_B += cut_height
+                    start_w_B = 0
+            else:
+                start_w_B += cut_width
+        divided_border.append((current_layer_divided_border_A,
+            current_layer_divided_border_B))
+    xxlog("Divide im2col matrix finished")
+
+    
+    '''
+    校验切分结果
+    1. 每块边长要为2的幂
+    2. A和B的相乘边切分结果要相同
+    3. A的不同行的上边切分结果应相同
+    4. B的不同列的左边的切分结果应相同
+    '''
+
+    xxlog("Checking divide result")
+
+    # 1. 每块边长要为2的幂
+    xxlog("Checking: matrix side length should be power of 2")
+    for layer in divided_border:
+        border_A = layer[0]
+        border_B = layer[1]
+        for border in border_A:
+            matrix_height = border[1] - border[0]
+            matrix_width = border[3] - border[2]
+            if(not is_power_of_2(matrix_height)):
+                xxlog("Check failed: %d is not power of 2"%(matrix_height), XXError())
+                raise ValueError("Check failed: %d is not power of 2"%(matrix_width))
+            if(not is_power_of_2(matrix_width)):
+                xxlog("Check failed: %d is not power of 2"%(matrix_width), XXError())
+                raise ValueError("Check failed: %d is not power of 2"%(matrix_width))
+        for border in border_B:
+            matrix_height = border[1] - border[0]
+            matrix_width = border[3] - border[2]
+            if(not is_power_of_2(matrix_height)):
+                xxlog("Check failed: %d is not power of 2"%(matrix_height), XXError())
+                raise ValueError("Check failed: %d is not power of 2"%(matrix_width))
+            if(not is_power_of_2(matrix_width)):
+                xxlog("Check failed: %d is not power of 2"%(matrix_width), XXError())
+                raise ValueError("Check failed: %d is not power of 2"%(matrix_width))
+    xxlog("Checking passed")
+
+    # 2. A和B的相乘边结果要相同
+    xxlog("Checking the multiply side of A and B and ensure them be the same")
+    for layer in divided_border:
+        temp_length_A = []
+        temp_length_B = []
+        border_A = layer[0]
+        border_B = layer[1]
+        for border in border_A:
+            if(border[0] == 0):
+                temp_length_A.append(border[3] - border[2])
+        for border in border_B:
+            if(border[2] == 0):
+                temp_length_B.append(border[1] - border[0])
+        if(temp_length_A != temp_length_B):
+            xxlog("Check failed: %s not equal %s"%(temp_length_A, temp_length_B))
+            raise ValueError("Check failed: %s not equal %s"%(
+                temp_length_A, temp_length_B))
+    xxlog("Checking passed")
+
+    # 3. A的不同行的上边切分结果要相同
+
+    # 4. B的不同列的左边切分结果要相同
+
+
+    '''
+    切分之后，如果切出来的矩阵边长均小于片上支持的最大矩阵边长，则考虑缩减C的空间
+    缩减方式：找到一个计算流程，使得
+    1. 尽可能多累加。
+    2. 传输边长小于等于64的矩阵时尽可能填满A和B。传输边长大于等于128的矩阵时，由于每次只需要传输一个矩阵，不需要尽可能填满A和B
+    根据该计算流程计算C的峰值占用空间
+    '''

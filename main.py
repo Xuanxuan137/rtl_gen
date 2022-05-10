@@ -97,11 +97,26 @@ if __name__ == "__main__":
         im2col_shape,
         calculation_graph
     )
+    '''
+    first_analyse_result = {
+        "bram_group": bram_group,   # bram组数(组边长小于512时，此值为0)
+        "bram_col_c_need_per_bram_group": bram_col_C_need_per_bram_group,   # 每组bram中C的列数
+        "depth_c_need_per_bram_col": depth_C_need_per_bram_col,     # C需要的bram深度
+        "total_bram_need": total_bram_need,     # 所需要的总的bram数
+        "bram_avaliable": int(bram_threshold*bram), # 可用的bram数
+        "max_matrix_len_support": max_len_support,  # 支持的最大矩阵(也即bram组的边长)
+        "min_matrix_len_support": min_len_support,  # 支持的最小矩阵
+        "calc_unit_per_bram_group": calc_uint_per_bram_group,   # 每组bram分配的计算单元组数
+        "total_lut_need": total_lut_need,           # 需要的总lut数
+        "lut_avaliable": int(lut_threshold*lut)     # 可用的lut数
+    }
+    '''
     
     # 第一次拆分张量表达式
     first_tensor_expression = analyser.split_tensor_expression_first_time(
         first_analyse_result,
         im2col_shape,
+        calculation_graph
     )
 
     exit()
