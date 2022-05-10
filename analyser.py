@@ -999,8 +999,45 @@ def split_tensor_expression_first_time(
     xxlog("Checking passed")
 
     # 3. A的不同行的上边切分结果要相同
+    xxlog("Checking up side of A and ensure matrix block of different row has" \
+        " the same upside len")
+    for layer in divided_border:
+        temp_length = []
+        border_A = layer[0]
+        last_start_h = -1
+        count = 0
+        for border in border_A:
+            if(border[0] == 0):     # 记录下第一行
+                temp_length.append(border[3] - border[2])
+            if(border[0] != last_start_h):  # 到新的一行块数重置
+                count = 0
+                last_start_h = border[0]
+            else:   # 记录后面行当前的块数
+                count += 1
+            if(border[0] != 0):
+                if(temp_length[count] != border[3] - border[2]):
+                    xxlog("Check failed: %d not equal %d"%(
+                        temp_length[count], border[3] - border[2]))
+                    raise ValueError("Check failed: %d not equal %d"%(
+                        temp_length[count], border[3] - border[2]))
+    xxlog("Checking passed")
 
     # 4. B的不同列的左边切分结果要相同
+    xxlog("Checking left side of B and ensure matrix block of different col " \
+        "has the same leftside len")
+    for layer in divided_border:
+        temp_length = 0
+        border_B = layer[1]
+        for border in border_B:
+            if(border[2] == 0):
+                temp_length = border[1] - border[0]
+            else:   # 每行后面几个的左边需与第一块一样长
+                if(temp_length != border[1] - border[0]):
+                    xxlog("Check failed: %d not equal %d"%(
+                        temp_length, border[1] - border[0]))
+                    raise ValueError("Check failed: %d not equal %d"%(
+                        temp_length, border[1] - border[0]))
+    xxlog("Checking passed")
 
 
     '''
