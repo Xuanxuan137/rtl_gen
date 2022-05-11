@@ -2,6 +2,7 @@
 import math
 
 import numpy as np
+from regex import FULLCASE, P
 import op
 from util import *
 
@@ -445,6 +446,10 @@ def analyse_resources_first_time(
         for shape in im2col_shape:
             original_shape.append(([shape[0][0], shape[0][1]], 
                 [shape[1][0], shape[1][1]]))
+        # 切分结果。它是一个list。里面的每个元素是一个tuple，表示一层的切分结果。
+        # tuple里有两个元素，分别为A和B的切分结果，它们都是list
+        # 这两个list中每个包含n个list。每个list包含4个元素，分别为切块在
+        # 纵向和横向上的起止点
         divided_border = []     # 切分结果
         xxlog("Divide im2col matrix...")
         for n, shape in enumerate(original_shape):
@@ -865,7 +870,11 @@ def split_tensor_expression_first_time(
     for shape in im2col_shape:
         original_shape.append(([shape[0][0], shape[0][1]], 
             [shape[1][0], shape[1][1]]))
-    divided_border = []     # 切分结果
+    # 切分结果。它是一个list。里面的每个元素是一个tuple，表示一层的切分结果。
+    # tuple里有两个元素，分别为A和B的切分结果，它们都是list
+    # 这两个list中每个包含n个list。每个list包含4个元素，分别为切块在
+    # 纵向和横向上的起止点
+    divided_border = []
     xxlog("Divide im2col matrix...")
     for n, shape in enumerate(original_shape):
         xxlog("Dividing conv2d layer %d: %s"%(
@@ -1107,3 +1116,115 @@ def split_tensor_expression_first_time(
     根据该计算流程计算C的峰值占用空间
     '''
     # 查找切块结果中最大矩阵边长(因为是为了检查C的峰值占用空间，所以应该检查A和B的结果边)
+
+    # 1. 因为现在没有限定矩阵一定是方阵，所以仅检查一条边是没用的，
+    #   需要同时检查A和B的结果边。但又不知道A和B中子矩阵的对应关系，所以需要先按行列编号，
+    #   才能确定A和B中的哪两个矩阵应该对应相乘。
+
+    # 子矩阵的边长。它是一个list。里面的每个元素是一个tuple，表示一层的子矩阵边长
+    # tuple里包含两个元素，它们都是list，分别表示A和B的子矩阵边长
+    # 这两个list中每个包含多个list，表示A或B一行子矩阵的边长
+    # 每个list中包含多个tuple，表示该行每个子矩阵的边长
+    # tuple中有两个元素，分别为height和width
+    xxlog("Assigning index to divide submatrix...")
+    submatrix_size = []
+    for n, layer in enumerate(divided_border):
+        border_A = layer[0]
+        border_B = layer[1]
+        submatrix_size_A = []
+        submatrix_size_B = []
+
+        # 遍历A
+        last_start_h = -1
+        submatrix_size_A_current_len = []
+        for border in border_A:
+            start_h = border[0]
+            height = border[1] - border[0]
+            width = border[3] - border[2]
+            if(start_h != last_start_h):
+                # 如果到新的一行
+                last_start_h = start_h
+                if(start_h != 0):
+                    # 如果不是第一行，把上一行的结果加入进去
+                    submatrix_size_A.append(submatrix_size_A_current_len)
+                # 清空上一行结果
+                submatrix_size_A_current_len = []
+            submatrix_size_A_current_len.append((height, width))
+        # 最后，把最后一行加入进去
+        submatrix_size_A.append(submatrix_size_A_current_len)
+
+        # 遍历B
+        last_start_h = -1
+        submatrix_size_B_current_len = []
+        for border in border_B:
+            start_h = border[0]
+            height = border[1] - border[0]
+            width = border[3] - border[2]
+            if(start_h != last_start_h):
+                # 如果到新的一行
+                last_start_h = start_h
+                if(start_h != 0):
+                    # 如果不是第一行，把上一行的结果加进去
+                    submatrix_size_B.append(submatrix_size_B_current_len)
+                # 清空上一行结果
+                submatrix_size_B_current_len = []
+            submatrix_size_B_current_len.append((height, width))
+        # 最后，把最后一行加入进去
+        submatrix_size_B.append(submatrix_size_B_current_len)
+
+        # 遍历完成后，将当前层结果加入最终结果
+        submatrix_size.append((submatrix_size_A, submatrix_size_B))
+
+        xxlog("Current layer size(regard a submatrix block as an element): "\
+            "A: [%d,%d], B: [%d,%d]"%(
+            len(submatrix_size_A), len(submatrix_size_A[0]), 
+            len(submatrix_size_B), len(submatrix_size_B[0])))
+    xxlog("Assign finished")
+
+    # 2. 同时检查A和B对应矩阵的结果边的长度。由于如果子矩阵边长达到了最大值，就一定会把
+    #   C占满，所以不需要考虑累加的问题，只需要检查是否达到最大值即可。
+    #   另一方面，子矩阵边长不可能超过max_len_support，所以最大值为max_len_support
+    xxlog("Finding if there is a pair of matrix of A and B to be matmuled " \
+        "has the result side with length equal to or larger than " \
+        "max_len_support...")
+    has_max_matrix = False
+    for layer in submatrix_size:
+        submatrix_size_A = layer[0]
+        submatrix_size_B = layer[1]
+        # 将每个子矩阵视为一个元素时，矩阵AB的尺寸
+        shape_A = (len(submatrix_size_A), len(submatrix_size_A[0]))
+        shape_B = (len(submatrix_size_B), len(submatrix_size_B[0]))
+        for i in range(shape_A[0]):
+            for j in range(shape_B[1]):
+                for k in range(shape_A[1]):
+                    # 当前要相乘的子矩阵的尺寸
+                    size_A = submatrix_size_A[i][k]
+                    size_B = submatrix_size_B[k][j]
+                    if(size_A[0] >= max_len_support and 
+                        size_B[1] >= max_len_support):
+                        has_max_matrix = True
+                        break
+    xxlog("Found: %s"%(has_max_matrix))
+
+    # TODO 如果找到了结果边均达到max_len_support的矩阵，说明C一定是占满的
+    # 为了测试后面的内容，暂时注释掉
+    # if(has_max_matrix):
+    #     xxlog("Since matrix with side length equal to or larger than " \
+    #         "max_len_support is found, C is full used, and the function " \
+    #         "should return")
+    #     return {
+    #         # C是否被占满
+    #         "is_c_fulled_used": True,
+    #         # C的最大使用量
+    #         "c_max_usage": None
+    #     }
+
+
+    # 如果没找到结果边均达到max_len_support的矩阵，说明C可能无法占满
+    # 寻找C的最大使用量
+    for layer in submatrix_size:
+        submatrix_size_A = layer[0]
+        submatrix_size_B = layer[1]
+        print(submatrix_size_A)
+        print(submatrix_size_B)
+        exit()
