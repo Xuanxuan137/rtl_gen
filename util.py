@@ -26,7 +26,8 @@ def xxlog(msg: str, type=None):
         type = "Info"
     with open("logs/rtl_gen_log.log", "a") as f:
         string = "[%s-%s-%s %s:%s:%s] %s: "%(
-            today.year, today.month, today.day, today.hour, today.minute, today.second,
+            today.year, today.month, today.day, today.hour, 
+            today.minute, today.second,
             type
         )
         f.write(string + msg + "\n")

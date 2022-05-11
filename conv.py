@@ -18,16 +18,17 @@ def decimal_to_binary(decimal_number, width):
 
 
 def gen_conv(
-    MODULE_NAME: str,           # 模块名
-    MUX_WIDTH: int,             # 选择信号位宽
-    DATA_WIDTH: int,            # 每个输入数据的位宽，如uint8，则为8
-    DATA_NUMBER: int,           # 输入数据数量，如256。这决定了乘累加树的宽度
-    OUTPUT_PORTS: list,         # 需要的输出端口，如16个累加的结果，256个累加的结果等
-    ZERO_X: list,               # ZERO_x数据列表
-    ZERO_W: list,               # ZERO_W数据列表
-    DEBUG=True,                 # 为所有数组信号生成额外的probe信号，方便查看波形
+    MODULE_NAME: str,   # 模块名
+    MUX_WIDTH: int,     # 选择信号位宽
+    DATA_WIDTH: int,    # 每个输入数据的位宽，如uint8，则为8
+    DATA_NUMBER: int,   # 输入数据数量，如256。这决定了乘累加树的宽度
+    OUTPUT_PORTS: list, # 需要的输出端口，如16个累加的结果，256个累加的结果等
+    ZERO_X: list,       # ZERO_x数据列表
+    ZERO_W: list,       # ZERO_W数据列表
+    DEBUG=True,         # 为所有数组信号生成额外的probe信号，方便查看波形
 ):
-    # 需要添加DEBUG信息的信号列表。每个元素是一个列表，里面有3个值，分别是信号名称，信号位宽，信号数组深度
+    # 需要添加DEBUG信息的信号列表。每个元素是一个列表，
+    # 里面有3个值，分别是信号名称，信号位宽，信号数组深度
     debug_signals = []
     # 中间结果各级寄存器数量
     intermediate_reg_number = {}
@@ -76,23 +77,30 @@ def gen_conv(
     code += indent + "reg [%d:0] valid_pipeline;\n"%(accumulate_time + 5)
 
     # 生成ina_use, inb_use
-    code += indent + "wire signed [%d:0] ina_use[%d:0];\n"%(DATA_WIDTH, DATA_NUMBER-1)
+    code += indent + "wire signed [%d:0] ina_use[%d:0];\n"%(
+        DATA_WIDTH, DATA_NUMBER-1)
     for i in range(DATA_NUMBER):
-        code += indent + "assign ina_use[%d] = {1'b0, ina[%d:%d]};\n"%(i, DATA_WIDTH*i+DATA_WIDTH-1, DATA_WIDTH*i)
+        code += indent + "assign ina_use[%d] = {1'b0, ina[%d:%d]};\n"%(
+            i, DATA_WIDTH*i+DATA_WIDTH-1, DATA_WIDTH*i)
     debug_signals.append(["ina_use", DATA_WIDTH+1, DATA_NUMBER])
-    code += indent + "wire signed [%d:0] inb_use[%d:0];\n"%(DATA_WIDTH, DATA_NUMBER-1)
+    code += indent + "wire signed [%d:0] inb_use[%d:0];\n"%(
+        DATA_WIDTH, DATA_NUMBER-1)
     for i in range(DATA_NUMBER):
-        code += indent + "assign inb_use[%d] = {1'b0, inb[%d:%d]};\n"%(i, DATA_WIDTH*i+DATA_WIDTH-1, DATA_WIDTH*i)
+        code += indent + "assign inb_use[%d] = {1'b0, inb[%d:%d]};\n"%(
+            i, DATA_WIDTH*i+DATA_WIDTH-1, DATA_WIDTH*i)
     debug_signals.append(["inb_use", DATA_WIDTH+1, DATA_NUMBER])
 
     # 生成data_a, data_b
-    code += indent + "reg signed [%d:0] data_a[%d:0];\n"%(DATA_WIDTH, DATA_NUMBER-1)
-    code += indent + "reg signed [%d:0] data_b[%d:0];\n"%(DATA_WIDTH, DATA_NUMBER-1)
+    code += indent + "reg signed [%d:0] data_a[%d:0];\n"%(
+        DATA_WIDTH, DATA_NUMBER-1)
+    code += indent + "reg signed [%d:0] data_b[%d:0];\n"%(
+        DATA_WIDTH, DATA_NUMBER-1)
     debug_signals.append(["data_a", DATA_WIDTH+1, DATA_NUMBER])
     debug_signals.append(["data_b", DATA_WIDTH+1, DATA_NUMBER])
 
     # 生成mult
-    code += indent + "reg signed [%d:0] mult[%d:0];\n"%(DATA_WIDTH*2+1, DATA_NUMBER-1)
+    code += indent + "reg signed [%d:0] mult[%d:0];\n"%(
+        DATA_WIDTH*2+1, DATA_NUMBER-1)
     debug_signals.append(["mult", DATA_WIDTH*2, DATA_NUMBER])
 
     # 生成add
@@ -108,7 +116,8 @@ def gen_conv(
         if(temp_port == DATA_NUMBER):
             code += indent + "reg signed [%d:0] add%d;\n"%(31, temp_port)
             continue
-        code += indent + "reg signed [%d:0] add%d[%d:0];\n"%(temp_width-1, temp_port, temp_number-1)
+        code += indent + "reg signed [%d:0] add%d[%d:0];\n"%(
+            temp_width-1, temp_port, temp_number-1)
         intermediate_reg_number[temp_port] = temp_number
         debug_signals.append(["add%d"%(temp_port), temp_width, temp_number])
 
@@ -132,11 +141,13 @@ def gen_conv(
     
     # 生成zero_x parameter
     for n,x in enumerate(ZERO_X):
-        code += indent + "parameter signed [%d:0] zero_x%d = %d;\n"%(DATA_WIDTH, n, x)
+        code += indent + "parameter signed [%d:0] zero_x%d = %d;\n"%(
+            DATA_WIDTH, n, x)
     
     # 生成zero_w parameter
     for n,w in enumerate(ZERO_W):
-        code += indent + "parameter signed [%d:0] zero_w%d = %d;\n"%(DATA_WIDTH, n, w)
+        code += indent + "parameter signed [%d:0] zero_w%d = %d;\n"%(
+            DATA_WIDTH, n, w)
     
     # 生成zero_x
     code += indent + "reg signed [%d:0] zero_x;\n"%(DATA_WIDTH)
@@ -145,7 +156,8 @@ def gen_conv(
     code += indent + "case(mux)\n"
     for n,x in enumerate(ZERO_X):
         indent = "\t\t\t"
-        code += indent + "%d'b%s: zero_x = zero_x%d;\n"%(MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
+        code += indent + "%d'b%s: zero_x = zero_x%d;\n"%(
+            MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
     code += indent + "default: zero_x = 0;\n"
     indent = "\t\t"
     code += indent + "endcase\n"
@@ -159,7 +171,8 @@ def gen_conv(
     code += indent + "case(mux)\n"
     for n,w in enumerate(ZERO_W):
         indent = "\t\t\t"
-        code += indent + "%d'b%s: zero_w = zero_w%d;\n"%(MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
+        code += indent + "%d'b%s: zero_w = zero_w%d;\n"%(
+            MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
     code += indent + "default: zero_w = 0;\n"
     indent = "\t\t"
     code += indent + "endcase\n"
@@ -170,7 +183,8 @@ def gen_conv(
     code += indent + "always @(posedge clk) begin\n"
     indent = "\t\t"
     #   # 生成valid_pipeline
-    code += indent + "valid_pipeline <= {valid_pipeline[%d:0], valid};\n"%(accumulate_time+4)
+    code += indent + "valid_pipeline <= {valid_pipeline[%d:0], valid};\n"%(
+        accumulate_time+4)
     #   # in -> data
     for i in range(DATA_NUMBER):
         code += indent + "data_a[%d] <= ina_use[%d] - zero_w;\n"%(i, i)
@@ -184,12 +198,15 @@ def gen_conv(
     if(temp_data_number % 2 == 1):
         temp_data_number = temp_data_number // 2 + 1
         for i in range(temp_data_number - 1):
-            code += indent + "add2[%d] <= mult[%d] + mult[%d];\n"%(i, i*2, i*2+1)
-        code += indent + "add2[%d] <= mult[%d];\n"%(temp_data_number-1, (temp_data_number-1)*2)
+            code += indent + "add2[%d] <= mult[%d] + mult[%d];\n"%(
+                i, i*2, i*2+1)
+        code += indent + "add2[%d] <= mult[%d];\n"%(
+            temp_data_number-1, (temp_data_number-1)*2)
     else:
         temp_data_number = temp_data_number // 2
         for i in range(temp_data_number):
-            code += indent + "add2[%d] <= mult[%d] + mult[%d];\n"%(i, i*2, i*2+1)
+            code += indent + "add2[%d] <= mult[%d] + mult[%d];\n"%(
+                i, i*2, i*2+1)
     #   # addn -> add2n
     for i in range(1, accumulate_time):
         if(temp_data_number % 2 == 1):
@@ -198,15 +215,19 @@ def gen_conv(
                 continue
             temp_data_number = temp_data_number // 2 + 1
             for j in range(temp_data_number - 1):
-                code += indent + "add%d[%d] <= add%d[%d] + add%d[%d];\n"%(2**(i+1), j, 2**i, j*2, 2**i, j*2+1)
-            code += indent + "add%d[%d] <= add%d[%d];\n"%(2**(i+1), temp_data_number-1, 2**i, (temp_data_number-1)*2)
+                code += indent + "add%d[%d] <= add%d[%d] + add%d[%d];\n"%(
+                    2**(i+1), j, 2**i, j*2, 2**i, j*2+1)
+            code += indent + "add%d[%d] <= add%d[%d];\n"%(
+                2**(i+1), temp_data_number-1, 2**i, (temp_data_number-1)*2)
         else:
             if(temp_data_number == 2):
-                code += indent + "add%d <= add%d[%d] + add%d[%d];\n"%(DATA_NUMBER, 2**i, 0, 2**i, 1)
+                code += indent + "add%d <= add%d[%d] + add%d[%d];\n"%(
+                    DATA_NUMBER, 2**i, 0, 2**i, 1)
                 continue
             temp_data_number = temp_data_number // 2
             for j in range(temp_data_number):
-                code += indent + "add%d[%d] <= add%d[%d] + add%d[%d];\n"%(2**(i+1), j, 2**i, j*2, 2**i, j*2+1)
+                code += indent + "add%d[%d] <= add%d[%d] + add%d[%d];\n"%(
+                    2**(i+1), j, 2**i, j*2, 2**i, j*2+1)
     indent = "\t"
     code += indent + "end\n"
 

@@ -18,17 +18,23 @@ from util import *
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate RTL")
 
-    parser.add_argument("-m", "--model_dir", required=True, help="Input model directory")
-    parser.add_argument("-p", "--part", required=True ,help="Project part, e.g. xc7z020clg400-1")
+    parser.add_argument("-m", "--model_dir", required=True, 
+        help="Input model directory")
+    parser.add_argument("-p", "--part", required=True, 
+        help="Project part, e.g. xc7z020clg400-1")
     parser.add_argument("--LUT", type=int, help="The number of LUT")
     parser.add_argument("--FF", type=int, help="The number of Flip Flop")
     parser.add_argument("--BRAM", type=int, help="The number of BRAM")
     parser.add_argument("--DSP", type=int, help="The number of DSP")
-    parser.add_argument("--BRAM_threshold", type=float, default=0.9, help="BRAM usage threshold")
-    parser.add_argument("--LUT_threshold", type=float, default=0.7, help="LUT usage threshold")
-    parser.add_argument("--data_on_chip", type=bool, default=True, help="Put part of data on chip")
+    parser.add_argument("--BRAM_threshold", type=float, default=0.9, 
+        help="BRAM usage threshold")
+    parser.add_argument("--LUT_threshold", type=float, default=0.7, 
+        help="LUT usage threshold")
+    parser.add_argument("--data_on_chip", type=bool, default=True, 
+        help="Put part of data on chip")
     parser.add_argument("--try_increase_c_bandwidth", type=bool, default=True,
-        help="Try increase C bandwidth to improve performance, but may cause overuse of bram")
+        help="Try increase C bandwidth to improve performance, " \
+            "but may cause overuse of bram")
 
     args = parser.parse_args()
     
@@ -64,8 +70,10 @@ if __name__ == "__main__":
            ff is None or
            bram is None or
            dsp is None):
-            xxlog("Since part is Unknown, you must specify the number of LUT, FF, BRAM, DSP", XXError())
-            raise ValueError("Since part is Unknown, you must specify the number of LUT, FF, BRAM, DSP")
+            xxlog("Since part is Unknown, you must specify the number of " \
+                "LUT, FF, BRAM, DSP", XXError())
+            raise ValueError("Since part is Unknown, you must specify " \
+                "the number of LUT, FF, BRAM, DSP")
         
     if(data_on_chip == False):
         raise ValueError("data_on_chip=False is not supported yet")
@@ -99,16 +107,26 @@ if __name__ == "__main__":
     )
     '''
     first_analyse_result = {
-        "bram_group": bram_group,   # bram组数(组边长小于512时，此值为0)
-        "bram_col_c_need_per_bram_group": bram_col_C_need_per_bram_group,   # 每组bram中C的列数
-        "depth_c_need_per_bram_col": depth_C_need_per_bram_col,     # C需要的bram深度
-        "total_bram_need": total_bram_need,     # 所需要的总的bram数
-        "bram_avaliable": int(bram_threshold*bram), # 可用的bram数
-        "max_matrix_len_support": max_len_support,  # 支持的最大矩阵(也即bram组的边长)
-        "min_matrix_len_support": min_len_support,  # 支持的最小矩阵
-        "calc_unit_per_bram_group": calc_uint_per_bram_group,   # 每组bram分配的计算单元组数
-        "total_lut_need": total_lut_need,           # 需要的总lut数
-        "lut_avaliable": int(lut_threshold*lut)     # 可用的lut数
+        # bram组数(组边长小于512时，此值为0)
+        "bram_group": bram_group,   
+        # 每组bram中C的列数
+        "bram_col_c_need_per_bram_group": bram_col_C_need_per_bram_group, 
+        # C需要的bram深度  
+        "depth_c_need_per_bram_col": depth_C_need_per_bram_col,     
+        # 所需要的总的bram数
+        "total_bram_need": total_bram_need,     
+        # 可用的bram数
+        "bram_avaliable": int(bram_threshold*bram),
+        # 支持的最大矩阵(也即bram组的边长)
+        "max_matrix_len_support": max_len_support,  
+        # 支持的最小矩阵
+        "min_matrix_len_support": min_len_support,  
+        # 每组bram分配的计算单元组数
+        "calc_unit_per_bram_group": calc_uint_per_bram_group,   
+        # 需要的总lut数
+        "total_lut_need": total_lut_need,           
+        # 可用的lut数
+        "lut_avaliable": int(lut_threshold*lut)     
     }
     '''
     

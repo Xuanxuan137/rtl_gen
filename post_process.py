@@ -1,5 +1,5 @@
 
-from socketserver import DatagramRequestHandler
+
 import numpy as np
 import math
 
@@ -44,7 +44,8 @@ def post_process(
     QMAX: int,                          # qmax
     DEBUG=True                          # debug
 ):
-    # 需要添加DEBUG信息的信号列表。每个元素是一个列表，里面有3个值，分别是信号名称，信号位宽，信号数组深度
+    # 需要添加DEBUG信息的信号列表。每个元素是一个列表，里面有3个值，
+    # 分别是信号名称，信号位宽，信号数组深度
     debug_signals = []
     # 中间结果各级寄存器数量
     intermediate_reg_number = {}
@@ -68,13 +69,15 @@ def post_process(
     code += indent + "input [%d:0] channel,\n"%(channel_width-1)
     code += indent + "input [%d:0] mux,\n"%(MUX_WIDTH-1)
     code += indent + "input do_relu,\n"
-    code += indent + "output [%d:0] out_contiguous,\n"%(OUT_DATA_WIDTH*DATA_NUMBER-1)
+    code += indent + "output [%d:0] out_contiguous,\n"%(
+        OUT_DATA_WIDTH*DATA_NUMBER-1)
     code = code[:-2] + "\n"
     code += ");\n"
 
     # 生成coe
     for n, c in enumerate(COE):
-        code += indent + "parameter [47:0] coe%d = 48'b%s;\n"%(n, coe_to_bin(c))
+        code += indent + "parameter [47:0] coe%d = 48'b%s;\n"%(
+            n, coe_to_bin(c))
     
     # 生成rshift
     for n, r in enumerate(RSHIFT):
@@ -98,7 +101,8 @@ def post_process(
     code += indent + "case(mux)\n"
     for n, c in enumerate(COE):
         indent = "\t\t\t"
-        code += indent + "%d'b%s: coe = coe%d;\n"%(MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
+        code += indent + "%d'b%s: coe = coe%d;\n"%(
+            MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
     code += indent + "default: coe = 0;\n"
     indent = "\t\t"
     code += indent + "endcase\n"
@@ -112,7 +116,8 @@ def post_process(
     code += indent + "case(mux)\n"
     for n, r in enumerate(RSHIFT):
         indent = "\t\t\t"
-        code += indent + "%d'b%s: rshift = rshift%d;\n"%(MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
+        code += indent + "%d'b%s: rshift = rshift%d;\n"%(
+            MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
     code += indent + "default: rshift = 0;\n"
     indent = "\t\t"
     code += indent + "endcase\n"
@@ -126,7 +131,8 @@ def post_process(
     code += indent + "case(mux)\n"
     for n, z in enumerate(ZERO_Y):
         indent = "\t\t\t"
-        code += indent + "%d'b%s: zero_y = zero_y%d;\n"%(MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
+        code += indent + "%d'b%s: zero_y = zero_y%d;\n"%(
+            MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
     code += indent + "default: zero_y = 0;\n"
     indent = "\t\t"
     code += indent + "endcase\n"
@@ -140,7 +146,8 @@ def post_process(
     code += indent + "case(mux)\n"
     for n, b in enumerate(BIAS):
         indent = "\t\t\t"
-        code += indent + "%d'b%s: bias = bias%d[channel];\n"%(MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
+        code += indent + "%d'b%s: bias = bias%d[channel];\n"%(
+            MUX_WIDTH, decimal_to_binary(n, MUX_WIDTH), n)
     code += indent + "default: bias = 0;\n"
     indent = "\t\t"
     code += indent + "endcase\n"
@@ -151,7 +158,8 @@ def post_process(
     code += indent + "wire signed [31:0] in[%d:0];\n"%(DATA_NUMBER-1)
     debug_signals.append(["in", 32, DATA_NUMBER])
     for i in range(DATA_NUMBER):
-        code += indent + "assign in[%d] = in_contiguous[%d:%d];\n"%(i, i*DATA_WIDTH+DATA_WIDTH-1, i*DATA_WIDTH)
+        code += indent + "assign in[%d] = in_contiguous[%d:%d];\n"%(
+            i, i*DATA_WIDTH+DATA_WIDTH-1, i*DATA_WIDTH)
     
     # 生成in_add_bias
     code += indent + "reg signed [31:0] in_add_bias[%d:0];\n"%(DATA_NUMBER-1)
@@ -188,7 +196,8 @@ def post_process(
     debug_signals.append(["relu", 32, DATA_NUMBER])
     for i in range(DATA_NUMBER):
         code += indent + "assign out_contiguous[%d:%d] = relu[%d][%d:0];\n"%(
-            i*OUT_DATA_WIDTH+OUT_DATA_WIDTH-1, i*OUT_DATA_WIDTH, i, OUT_DATA_WIDTH-1
+            i*OUT_DATA_WIDTH+OUT_DATA_WIDTH-1, i*OUT_DATA_WIDTH, 
+            i, OUT_DATA_WIDTH-1
         )
     
     # 生成流水计算模块
@@ -200,15 +209,17 @@ def post_process(
     #   # fp_temp = temp
     for i in range(DATA_NUMBER):
         code += indent + "fp_temp_sign[%d] <= in_add_bias[%d][31];\n"%(i, i)
-        code += indent + "fp_temp[%d] <= {{(in_add_bias[%d] - in_add_bias[%d][31]) ^ " \
-        "({32{in_add_bias[%d][31]}})}, 16'b0};\n"%(i, i, i, i)
+        code += indent + "fp_temp[%d] <= {{(in_add_bias[%d] - " \
+            "in_add_bias[%d][31]) ^ ({32{in_add_bias[%d][31]}})}, 16'b0};\n"%(
+                i, i, i, i)
     #   # fp_temp *= coe
     for i in range(DATA_NUMBER):
         code += indent + "mult_sign[%d] <= fp_temp_sign[%d];\n"%(i, i)
         code += indent + "mult[%d] <= mult_temp[%d][63:16];\n"%(i, i)
     #   # t = fp_temp->to_int() >> rshift
     for i in range(DATA_NUMBER):
-        code += indent + "t[%d] <= ((mult[%d][47:16] >> rshift) ^ {32{mult_sign[%d]}}) + mult_sign[%d];\n"%(i, i, i, i)
+        code += indent + "t[%d] <= ((mult[%d][47:16] >> rshift) ^ " \
+            "{32{mult_sign[%d]}}) + mult_sign[%d];\n"%(i, i, i, i)
     #   # t_add = t + zero_y
     for i in range(DATA_NUMBER):
         code += indent + "t_add[%d] <= t[%d] + zero_y;\n"%(i, i)
@@ -216,7 +227,8 @@ def post_process(
     code += indent + "if(do_relu) begin\n"
     indent = "\t\t\t"
     for i in range(DATA_NUMBER):
-        code += indent + "relu[%d] <= (t_add[%d] < zero_y) ? zero_y : \n"%(i, i)
+        code += indent + "relu[%d] <= (t_add[%d] < zero_y) ? zero_y : \n"%(
+            i, i)
         code += indent + "            (t_add[%d] > qmax) ? qmax : \n"%(i)
         code += indent + "            t_add[%d];\n"%(i)
     indent = "\t\t"
