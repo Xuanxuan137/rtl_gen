@@ -29,15 +29,33 @@ def get_bram_usage(width, depth):
             1024: (2, 0), 
             1536: (3, 0),
             2048: (4, 0),
+            2560: (5, 0),
             3072: (6, 0),
+            3584: (7, 0),
             4096: (7, 1),
+            4608: (9, 0),
             5120: (8, 3),
+            5632: (8, 5),
             6144: (10, 2),
+            6656: (8, 9),
             7168: (11, 4),
+            7680: (10, 8),
             8192: (14, 1),
+            8704: (14, 4),
+            9216: (15, 3),
+            9728: (15, 5),
             10240: (17, 2),
+            10752: (15, 9),
+            11264: (18, 4),
+            11776: (17, 8),
             12288: (21, 1),
+            12800: (21, 4),
+            13312: (22, 3),
+            13824: (22, 5),
             14336: (24, 2),
+            14848: (22, 9),
+            15360: (25, 4),
+            15872: (24, 8),
             16384: (28, 1),
             24576: (43, 0),
             32768: (57, 0),
@@ -339,27 +357,27 @@ def analyse_resources_first_time(
         total_lut_need, int(lut_threshold*lut)))
 
     
-    calc_uint_per_bram_group = 1
+    calc_unit_per_bram_group = 1
     if(total_lut_need - lut_counter_per_dsp*dsp <= int(lut_threshold*lut)):
         # 如果资源充足，增加每个bram组的计算单元数量
         xxlog("Try to double calculation unit")
         while(True):
             total_lut_need *= 2
-            calc_uint_per_bram_group *= 2
+            calc_unit_per_bram_group *= 2
             if(total_lut_need - lut_counter_per_dsp*dsp 
                 <= int(lut_threshold*lut)):
                 xxlog("Calculation unit per bram group: %d, " \
                     "Total lut need: %d. Lut avaliable: %d"%(
-                        calc_uint_per_bram_group, total_lut_need,
+                        calc_unit_per_bram_group, total_lut_need,
                         int(lut_threshold*lut)
                     ))
             else:
                 # 此时已经用超了
                 total_lut_need //= 2
-                calc_uint_per_bram_group //= 2
-                xxlog("First lut allocate finished: Calculation uint " \
+                calc_unit_per_bram_group //= 2
+                xxlog("First lut allocate finished: Calculation unit " \
                     "per group: %d. Total lut need: %d. Lut avaliable: %d"%(
-                        calc_uint_per_bram_group, total_lut_need, 
+                        calc_unit_per_bram_group, total_lut_need, 
                         int(lut_threshold*lut)))
                 break
     else:
@@ -428,7 +446,7 @@ def analyse_resources_first_time(
         "\tLut avaliable: %d"%(
             max_len_support, bram_group, incomplete_bram_group_len, 
             total_bram_need, int(bram_threshold*bram), max_len_support, 
-            min_len_support, calc_uint_per_bram_group, total_lut_need, 
+            min_len_support, calc_unit_per_bram_group, total_lut_need, 
             int(lut_threshold*lut)
         ))
 
@@ -643,7 +661,7 @@ def analyse_resources_first_time(
         # 每组每周期得到的结果数
         result_per_cycle_per_bram_group = (
             result_per_cycle_per_bram_group_per_calc_unit * 
-            calc_uint_per_bram_group)
+            calc_unit_per_bram_group)
         xxlog("Result per cycle per bram group: %d"%(
             result_per_cycle_per_bram_group))
         # 3. 根据C需要的带宽计算C实际需要的bram数
@@ -757,28 +775,28 @@ def analyse_resources_first_time(
         xxlog("Lut need(no consider dsp): %d. Lut avaliable: %d"%(
             total_lut_need, int(lut_threshold*lut)))
         
-        calc_uint_per_bram_group = 1
+        calc_unit_per_bram_group = 1
         if(total_lut_need - lut_counter_per_dsp*dsp <= int(lut_threshold*lut)):
             # 如果资源充足，增加每个bram组的计算单元数量
             xxlog("Try to double calculation unit")
             while(True):
                 total_lut_need *= 2
-                calc_uint_per_bram_group *= 2
+                calc_unit_per_bram_group *= 2
                 if(total_lut_need - lut_counter_per_dsp*dsp 
                     <= int(lut_threshold*lut)):
                     xxlog("Calculation unit per bram group: %d, " \
                         "Total lut need: %d. Lut avaliable: %d"%(
-                            calc_uint_per_bram_group, total_lut_need,
+                            calc_unit_per_bram_group, total_lut_need,
                             int(lut_threshold*lut)
                         ))
                 else:
                     # 此时已经用超了
                     total_lut_need //= 2
-                    calc_uint_per_bram_group //= 2
-                    xxlog("First lut allocate finished: Calculation uint " \
+                    calc_unit_per_bram_group //= 2
+                    xxlog("First lut allocate finished: Calculation unit " \
                         "per group: %d. Total lut need: %d. Lut avaliable" \
                         ": %d"%(
-                            calc_uint_per_bram_group, total_lut_need, 
+                            calc_unit_per_bram_group, total_lut_need, 
                             int(lut_threshold*lut)))
                     break
         incomplete_bram_group_len = 0 if(bram_group >= 1) else max_len_support
@@ -795,7 +813,7 @@ def analyse_resources_first_time(
             "\tLut avaliable: %d"%(
                 bram_group, incomplete_bram_group_len, total_bram_need, 
                 int(bram_threshold*bram), max_len_support, min_len_support, 
-                calc_uint_per_bram_group, total_lut_need, 
+                calc_unit_per_bram_group, total_lut_need, 
                 int(lut_threshold*lut)
             ))
         xxlog("Check again...")
@@ -818,7 +836,7 @@ def analyse_resources_first_time(
             bram_group, incomplete_bram_group_len, 
             bram_col_C_need_per_bram_group, depth_C_need_per_bram_col, 
             total_bram_need, int(bram_threshold*bram), 
-            max_len_support, min_len_support, calc_uint_per_bram_group, 
+            max_len_support, min_len_support, calc_unit_per_bram_group, 
             total_lut_need, int(lut_threshold*lut)
             ))
 
@@ -838,7 +856,7 @@ def analyse_resources_first_time(
         # 支持的最小矩阵
         "min_matrix_len_support": min_len_support,  
         # 每组bram分配的计算单元组数
-        "calc_unit_per_bram_group": calc_uint_per_bram_group,   
+        "calc_unit_per_bram_group": calc_unit_per_bram_group,   
         # 需要的总lut数
         "total_lut_need": total_lut_need,          
          # 可用的lut数
@@ -1285,7 +1303,8 @@ def split_tensor_expression_first_time(
             else (max_len_support*max_len_support*bram_group)
         C_capacity = bram_col_C_need_per_bram_group * \
             depth_c_need_per_bram_col * 8 if(bram_group == 0) else \
-            bram_col_C_need_per_bram_group*depth_c_need_per_bram_col*bram_group
+            bram_col_C_need_per_bram_group * depth_c_need_per_bram_col * \
+            bram_group * 8
         xxlog("Got the capaticy of A, B, C: %d, %d, %d"%(
             A_capacity, B_capacity, C_capacity))
         xxlog("im2col shape: A: %s, B: %s"%(original_shape[layer_index][0], 
@@ -1544,13 +1563,14 @@ def split_tensor_expression_first_time(
                         else:
                             # 如果空间不够
                             clear_plan()
-                            add_to_plan(multer_A, multer_B, block_C, size_A, 
+                            add_to_plan(multer_A, multer_B, block_C, size_A,
                                 size_B, size_C, space_A, space_B, space_C)
                             continue
             
 
             # 遍历计算当前C块需要的每一对AB完成
-            can_hold_next_C_block_all = check_can_hold_next_C_block_all(C_block_index)
+            can_hold_next_C_block_all = check_can_hold_next_C_block_all(
+                C_block_index)
             if(can_hold_next_C_block_all):
                 continue
             else:
@@ -1561,8 +1581,8 @@ def split_tensor_expression_first_time(
     
     C_fulled_used = True if(C_max_usage >= C_capacity) else False
     xxlog("First split tensor expression result: \n" \
-        "is_c_fulled_used: %s\n" \
-        "c_max_usage: %d"%(C_fulled_used,
+        "\tis_c_fulled_used: %s\n" \
+        "\tc_max_usage: %d"%(C_fulled_used,
         C_max_usage))
     return {
         # C是否被占满
@@ -1570,3 +1590,50 @@ def split_tensor_expression_first_time(
         # C的最大使用量
         "c_max_usage": C_max_usage
     }
+
+
+def analyse_resources_second_time(
+    project_part,
+    lut,
+    ff,
+    bram,
+    dsp,
+    bram_threshold,
+    lut_threshold,
+    im2col_shape,
+    calculation_graph,
+    first_analyse_result,
+    first_tensor_expression
+):
+    xxlog("Analysing resource second time...")
+
+    is_c_fulled_used = first_tensor_expression["is_c_fulled_used"]
+    if(True or is_c_fulled_used):
+        # 如果C已经占满，则返回原来结果以及不需要更激进的分配
+        first_analyse_result_copy = first_analyse_result.copy()
+        first_analyse_result_copy["more_radical_allocation"] = False
+        xxlog("Found C fully used. Keep old allocation. No more radical " \
+            "allocation. The result is shown below:\n" \
+            "\tComplete bram group: %d\n" \
+            "\tBram column C need per bram group: %d\n" \
+            "\tDepth C need per bram col: %d\n" \
+            "\tTotal bram need: %d\n" \
+            "\tBram avaliable: %d\n" \
+            "\tMax matrix len support: %d\n" \
+            "\tMin matrix len support: %d\n" \
+            "\tCalculation unit per bram group: %d\n" \
+            "\tTotal lut need: %d\n" \
+            "\tLut avaliable: %d\n" \
+            "\tMore radical allocation: %s"%(
+            first_analyse_result_copy["bram_group"], 
+            first_analyse_result_copy["bram_col_c_need_per_bram_group"], 
+            first_analyse_result_copy["depth_c_need_per_bram_col"], 
+            first_analyse_result_copy["total_bram_need"], 
+            first_analyse_result_copy["bram_avaliable"], 
+            first_analyse_result_copy["max_matrix_len_support"], 
+            first_analyse_result_copy["min_matrix_len_support"], 
+            first_analyse_result_copy["calc_unit_per_bram_group"], 
+            first_analyse_result_copy["total_lut_need"], 
+            first_analyse_result_copy["lut_avaliable"],
+            first_analyse_result_copy["more_radical_allocation"]))
+        return first_analyse_result_copy

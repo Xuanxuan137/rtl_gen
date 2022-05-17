@@ -136,6 +136,56 @@ if __name__ == "__main__":
         im2col_shape,
         calculation_graph
     )
+    '''
+    return {
+        # C是否被占满
+        "is_c_fulled_used": C_fulled_used,
+        # C的最大使用量
+        "c_max_usage": C_max_usage
+    }
+    '''
+    
+    # 第二次资源分配
+    second_analyse_result = analyser.analyse_resources_second_time(
+        project_part,
+        lut,
+        ff,
+        bram,
+        dsp,
+        bram_threshold,
+        lut_threshold,
+        im2col_shape,
+        calculation_graph,
+        first_analyse_result,
+        first_tensor_expression
+    )
+    print(second_analyse_result)
+    '''
+    second_analyse_result = {
+        # bram组数(组边长小于512时，此值为0)
+        "bram_group": bram_group,   
+        # 每组bram中C的列数
+        "bram_col_c_need_per_bram_group": bram_col_C_need_per_bram_group, 
+        # C需要的bram深度  
+        "depth_c_need_per_bram_col": depth_C_need_per_bram_col,     
+        # 所需要的总的bram数
+        "total_bram_need": total_bram_need,     
+        # 可用的bram数
+        "bram_avaliable": int(bram_threshold*bram),
+        # 支持的最大矩阵(也即bram组的边长)
+        "max_matrix_len_support": max_len_support,  
+        # 支持的最小矩阵
+        "min_matrix_len_support": min_len_support,  
+        # 每组bram分配的计算单元组数
+        "calc_unit_per_bram_group": calc_uint_per_bram_group,   
+        # 需要的总lut数
+        "total_lut_need": total_lut_need,           
+        # 可用的lut数
+        "lut_avaliable": int(lut_threshold*lut)
+        # 是否采用了更激进的分配
+        "more_radical_allocation": more_radical_allocation   
+    }
+    '''
 
     exit()
 
