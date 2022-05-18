@@ -5,8 +5,19 @@ import numpy as np
 import op
 from util import *
 
+def round_to_half(value):
+    '''
+    取整到0.5，返回tuple
+    '''
+    integer = int(value)
+    half = 1 if(value - integer >= 0.5) else 0
+    return (integer, half)
+
 
 def is_large_matrix(matrix_space):
+    '''
+    判断是否是大矩阵
+    '''
     if(matrix_space >= 16384):
         return True
     return False
@@ -72,6 +83,95 @@ def get_bram_usage(width, depth):
         xxlog("Width=%d not supported yet"%(width), XXError())
         raise ValueError("Width=%d not supported yet"%(width))
 
+
+def get_bram_depth(width, usage):
+    '''
+    根据bram位宽和用量获取可用bram深度
+    由于不知道xilinx是怎么计算bram用量的，这一步目前只能查表
+    这个不太靠谱，勉强用吧
+    '''
+    if(width == 64):
+        depth = {
+            # depth: (36K usage, 18K usage)
+            (1, 0): 512,
+            (1, 1): 512,
+            (2, 0): 1024, 
+            (2, 1): 1024,
+            (3, 0): 1536,
+            (3, 1): 1536,
+            (4, 0): 2048,
+            (4, 1): 2048,
+            (5, 0): 2560,
+            (5, 1): 2560,
+            (6, 0): 3072,
+            (6, 1): 3072,
+            (7, 0): 3584,
+            (7, 1): 4096,
+            (8, 0): 4096,
+            (8, 1): 4096,
+            (9, 0): 4608,
+            (9, 1): 5120,
+            (10, 0): 5120,
+            (10, 1): 5632,
+            (11, 0): 6144,
+            (11, 1): 6144,
+            (12, 0): 6144,
+            (12, 1): 6656,
+            (13, 0): 7168,
+            (13, 1): 7168,
+            (14, 0): 7680,
+            (14, 1): 8192,
+            (15, 0): 8192,
+            (15, 1): 8192,
+            (16, 0): 8704,
+            (16, 1): 9216,
+            (17, 0): 9216,
+            (17, 1): 9728,
+            (18, 0): 10240,
+            (18, 1): 10240,
+            (19, 0): 10240,
+            (19, 1): 10752,
+            (20, 0): 11264,
+            (20, 1): 11264,
+            (21, 0): 11776,
+            (21, 1): 12288,
+            (22, 0): 12288,
+            (22, 1): 12288,
+            (23, 0): 12800,
+            (23, 1): 13312,
+            (24, 0): 13312,
+            (24, 1): 13824,
+            (25, 0): 14336,
+            (25, 1): 14336,
+            (26, 0): 14336,
+            (26, 1): 14848,
+            (27, 0): 15360,
+            (27, 1): 15360,
+            (28, 0): 15872,
+            (28, 1): 16384,
+            (29, 0): 16384,
+            (29, 1): 16384,
+            (30, 0): 16384,
+            (30, 1): 16384,
+            (31, 0): 16384,
+            (31, 1): 16384,
+            (32, 0): 16384,
+            (32, 1): 16384,
+            (43, 0): 24576,
+            (57, 0): 32768,
+            (85, 1): 49152,
+            (114, 0): 65536,
+        }
+        try: 
+            return depth[usage]
+        except:
+            xxlog("Width=%d, Usage=(%d, %d) not supported yet"%(
+                width, usage[0], usage[1]))
+            raise ValueError("Width=%d, Usage=(%d, %d) not supported yet"%(
+                width, usage[0], usage[1]))
+    else:
+        xxlog("Width=%d not supported yet"%(width), XXError())
+        raise ValueError("Width=%d not supported yet"%(width))
 
 def set_resources(
     project_part,
@@ -210,6 +310,153 @@ def fit_to_power_of_2(value, min_len_support):
     if(value > (upper_bound + lower_bound) // 2):
         return upper_bound
     return lower_bound
+
+
+def cut_im2col_matrix(
+    im2col_shape,
+    calculation_graph,
+    max_len_support,
+    min_len_support,
+):
+    '''
+    将im2col后的矩阵切块
+    '''
+    original_shape = []
+    xxlog("Copy im2col_shape to original_shape...")
+    for shape in im2col_shape:
+        original_shape.append(([shape[0][0], shape[0][1]], 
+            [shape[1][0], shape[1][1]]))
+    # 切分结果。它是一个list。里面的每个元素是一个tuple，表示一层的切分结果。
+    # tuple里有两个元素，分别为A和B的切分结果，它们都是list
+    # 这两个list中每个包含n个list。每个list包含4个元素，分别为切块在
+    # 纵向和横向上的起止点
+    divided_border = []     # 切分结果
+    xxlog("Divide im2col matrix...")
+    for n, shape in enumerate(original_shape):
+        xxlog("Dividing conv2d layer %d: %s"%(
+            n, search_conv2d(calculation_graph, n+1)))
+        xxlog("Currect layer shape: %s, %s"%(shape[0], shape[1]))
+        height_A = shape[0][0]
+        width_A = shape[0][1]
+        height_B = shape[1][0]
+        width_B = shape[1][1]
+        start_h_A = 0
+        start_w_A = 0
+        start_h_B = 0
+        start_w_B = 0
+        current_layer_divided_border_A = []
+        current_layer_divided_border_B = []
+        # A和b是分别切分的。除了相乘边需要保持一致外，其他边不需要一致。
+        # 先切分A
+        while(True):
+            if(height_A - start_h_A >= max_len_support and
+                width_A - start_w_A >= max_len_support):
+                # 如果足够切出来最大的块
+                cut_height = max_len_support
+                cut_width = max_len_support
+            else:
+                # 如果不足够切出来最大的块
+                if(height_A - start_h_A < max_len_support and
+                    width_A - start_w_A < max_len_support):
+                    # 如果height和width都不够
+                    cut_height = fit_to_power_of_2(
+                        height_A - start_h_A, min_len_support)
+                    cut_width = fit_to_power_of_2(
+                        width_A - start_w_A, min_len_support)
+                elif(height_A - start_h_A < max_len_support):
+                    # 如果height不够
+                    cut_height = fit_to_power_of_2(
+                        height_A - start_h_A, min_len_support)
+                    cut_width = max_len_support
+                elif(width_A - start_w_A < max_len_support):
+                    # 如果width不够
+                    cut_height = max_len_support
+                    cut_width = fit_to_power_of_2(
+                        width_A - start_w_A, min_len_support)
+                else:
+                    xxlog("Error when dividing matrix: height_A:%d, " \
+                        "start_h_A:%d, width_A:%d, start_w_A:%d, " \
+                        "max_len_support:%d"%(height_A, start_h_A, width_A,
+                        start_w_A, max_len_support), XXError())
+                    raise ValueError("Error when dividing matrix")
+            # 保存切分结果
+            current_layer_divided_border_A.append(
+                [start_h_A, start_h_A+cut_height, 
+                    start_w_A, start_w_A+cut_width]
+            )
+            xxlog("Cut [%d:%d, %d:%d] from A"%(
+                current_layer_divided_border_A[-1][0], 
+                current_layer_divided_border_A[-1][1],
+                current_layer_divided_border_A[-1][2],
+                current_layer_divided_border_A[-1][3]))
+            # 修改下一次切分起始点
+            if(start_w_A + cut_width >= width_A):
+                # width方向达到最大值，需要换行
+                if(start_h_A + cut_height >= height_A):
+                    # 如果height方向也达到最大值，结束
+                    break
+                else:
+                    start_h_A += cut_height
+                    start_w_A = 0
+            else:
+                start_w_A += cut_width
+        # 再切分B
+        while(True):
+            if(height_B - start_h_B >= max_len_support and
+                width_B - start_w_B >= max_len_support):
+                # 如果足够切出来最大的块
+                cut_height = max_len_support
+                cut_width = max_len_support
+            else:
+                # 如果不足够切出来最大的块
+                if(height_B - start_h_B < max_len_support and
+                    width_B - start_w_B < max_len_support):
+                    # 如果height和width都不够
+                    cut_height = fit_to_power_of_2(
+                        height_B - start_h_B, min_len_support)
+                    cut_width = fit_to_power_of_2(
+                        width_B - start_w_B, min_len_support)
+                elif(height_B - start_h_B < max_len_support):
+                    # 如果height不够
+                    cut_height = fit_to_power_of_2(
+                        height_B - start_h_B, min_len_support)
+                    cut_width = max_len_support
+                elif(width_B - start_w_B < max_len_support):
+                    # 如果width不够
+                    cut_height = max_len_support
+                    cut_width = fit_to_power_of_2(
+                        width_B - start_w_B, min_len_support)
+                else:
+                    xxlog("Error when dividing matrix: height_B:%d, " \
+                        "start_h_B:%d, width_B:%d, start_w_B:%d, " \
+                        "max_len_support:%d"%(height_B, start_h_B, width_B,
+                        start_w_B, max_len_support), XXError())
+                    raise ValueError("Error when dividing matrix")
+            # 保存切分结果
+            current_layer_divided_border_B.append(
+                [start_h_B, start_h_B+cut_height, 
+                    start_w_B, start_w_B+cut_width]
+            )
+            xxlog("Cut [%d:%d, %d:%d] from B"%(
+                current_layer_divided_border_B[-1][0], 
+                current_layer_divided_border_B[-1][1],
+                current_layer_divided_border_B[-1][2],
+                current_layer_divided_border_B[-1][3]))
+            # 修改下一次切分起始点
+            if(start_w_B + cut_width >= width_B):
+                # width方向达到最大值，需要换行
+                if(start_h_B + cut_height >= height_B):
+                    # 如果height方向也达到最大值，结束
+                    break
+                else:
+                    start_h_B += cut_height
+                    start_w_B = 0
+            else:
+                start_w_B += cut_width
+        divided_border.append((current_layer_divided_border_A,
+            current_layer_divided_border_B))
+    xxlog("Divide im2col matrix finished")
+    return divided_border
 
 
 def analyse_resources_first_time(
@@ -464,141 +711,16 @@ def analyse_resources_first_time(
     得到切块结果
     '''
     while(True):
-        original_shape = []
-        xxlog("Copy im2col_shape to original_shape...")
-        for shape in im2col_shape:
-            original_shape.append(([shape[0][0], shape[0][1]], 
-                [shape[1][0], shape[1][1]]))
         # 切分结果。它是一个list。里面的每个元素是一个tuple，表示一层的切分结果。
         # tuple里有两个元素，分别为A和B的切分结果，它们都是list
         # 这两个list中每个包含n个list。每个list包含4个元素，分别为切块在
         # 纵向和横向上的起止点
-        divided_border = []     # 切分结果
-        xxlog("Divide im2col matrix...")
-        for n, shape in enumerate(original_shape):
-            xxlog("Dividing conv2d layer %d: %s"%(
-                n, search_conv2d(calculation_graph, n+1)))
-            xxlog("Currect layer shape: %s, %s"%(shape[0], shape[1]))
-            height_A = shape[0][0]
-            width_A = shape[0][1]
-            height_B = shape[1][0]
-            width_B = shape[1][1]
-            start_h_A = 0
-            start_w_A = 0
-            start_h_B = 0
-            start_w_B = 0
-            current_layer_divided_border_A = []
-            current_layer_divided_border_B = []
-            # A和b是分别切分的。除了相乘边需要保持一致外，其他边不需要一致。
-            # 先切分A
-            while(True):
-                if(height_A - start_h_A >= max_len_support and
-                   width_A - start_w_A >= max_len_support):
-                    # 如果足够切出来最大的块
-                    cut_height = max_len_support
-                    cut_width = max_len_support
-                else:
-                    # 如果不足够切出来最大的块
-                    if(height_A - start_h_A < max_len_support and
-                       width_A - start_w_A < max_len_support):
-                        # 如果height和width都不够
-                        cut_height = fit_to_power_of_2(
-                            height_A - start_h_A, min_len_support)
-                        cut_width = fit_to_power_of_2(
-                            width_A - start_w_A, min_len_support)
-                    elif(height_A - start_h_A < max_len_support):
-                        # 如果height不够
-                        cut_height = fit_to_power_of_2(
-                            height_A - start_h_A, min_len_support)
-                        cut_width = max_len_support
-                    elif(width_A - start_w_A < max_len_support):
-                        # 如果width不够
-                        cut_height = max_len_support
-                        cut_width = fit_to_power_of_2(
-                            width_A - start_w_A, min_len_support)
-                    else:
-                        xxlog("Error when dividing matrix: height_A:%d, " \
-                            "start_h_A:%d, width_A:%d, start_w_A:%d, " \
-                            "max_len_support:%d"%(height_A, start_h_A, width_A,
-                            start_w_A, max_len_support), XXError())
-                        raise ValueError("Error when dividing matrix")
-                # 保存切分结果
-                current_layer_divided_border_A.append(
-                    [start_h_A, start_h_A+cut_height, 
-                        start_w_A, start_w_A+cut_width]
-                )
-                xxlog("Cut [%d:%d, %d:%d] from A"%(
-                    current_layer_divided_border_A[-1][0], 
-                    current_layer_divided_border_A[-1][1],
-                    current_layer_divided_border_A[-1][2],
-                    current_layer_divided_border_A[-1][3]))
-                # 修改下一次切分起始点
-                if(start_w_A + cut_width >= width_A):
-                    # width方向达到最大值，需要换行
-                    if(start_h_A + cut_height >= height_A):
-                        # 如果height方向也达到最大值，结束
-                        break
-                    else:
-                        start_h_A += cut_height
-                        start_w_A = 0
-                else:
-                    start_w_A += cut_width
-            # 再切分B
-            while(True):
-                if(height_B - start_h_B >= max_len_support and
-                   width_B - start_w_B >= max_len_support):
-                    # 如果足够切出来最大的块
-                    cut_height = max_len_support
-                    cut_width = max_len_support
-                else:
-                    # 如果不足够切出来最大的块
-                    if(height_B - start_h_B < max_len_support and
-                       width_B - start_w_B < max_len_support):
-                        # 如果height和width都不够
-                        cut_height = fit_to_power_of_2(
-                            height_B - start_h_B, min_len_support)
-                        cut_width = fit_to_power_of_2(
-                            width_B - start_w_B, min_len_support)
-                    elif(height_B - start_h_B < max_len_support):
-                        # 如果height不够
-                        cut_height = fit_to_power_of_2(
-                            height_B - start_h_B, min_len_support)
-                        cut_width = max_len_support
-                    elif(width_B - start_w_B < max_len_support):
-                        # 如果width不够
-                        cut_height = max_len_support
-                        cut_width = fit_to_power_of_2(
-                            width_B - start_w_B, min_len_support)
-                    else:
-                        xxlog("Error when dividing matrix: height_B:%d, " \
-                            "start_h_B:%d, width_B:%d, start_w_B:%d, " \
-                            "max_len_support:%d"%(height_B, start_h_B, width_B,
-                            start_w_B, max_len_support), XXError())
-                        raise ValueError("Error when dividing matrix")
-                # 保存切分结果
-                current_layer_divided_border_B.append(
-                    [start_h_B, start_h_B+cut_height, 
-                        start_w_B, start_w_B+cut_width]
-                )
-                xxlog("Cut [%d:%d, %d:%d] from B"%(
-                    current_layer_divided_border_B[-1][0], 
-                    current_layer_divided_border_B[-1][1],
-                    current_layer_divided_border_B[-1][2],
-                    current_layer_divided_border_B[-1][3]))
-                # 修改下一次切分起始点
-                if(start_w_B + cut_width >= width_B):
-                    # width方向达到最大值，需要换行
-                    if(start_h_B + cut_height >= height_B):
-                        # 如果height方向也达到最大值，结束
-                        break
-                    else:
-                        start_h_B += cut_height
-                        start_w_B = 0
-                else:
-                    start_w_B += cut_width
-            divided_border.append((current_layer_divided_border_A,
-                current_layer_divided_border_B))
-        xxlog("Divide im2col matrix finished")
+        divided_border = cut_im2col_matrix(
+            im2col_shape,
+            calculation_graph,
+            max_len_support,
+            min_len_support
+        )
         
         '''
         校验切分结果：
@@ -897,132 +1019,12 @@ def split_tensor_expression_first_time(
     # tuple里有两个元素，分别为A和B的切分结果，它们都是list
     # 这两个list中每个包含n个list。每个list包含4个元素，分别为切块在
     # 纵向和横向上的起止点
-    divided_border = []
-    xxlog("Divide im2col matrix...")
-    for n, shape in enumerate(original_shape):
-        xxlog("Dividing conv2d layer %d: %s"%(
-            n, search_conv2d(calculation_graph, n+1)))
-        xxlog("Currect layer shape: %s, %s"%(shape[0], shape[1]))
-        height_A = shape[0][0]
-        width_A = shape[0][1]
-        height_B = shape[1][0]
-        width_B = shape[1][1]
-        start_h_A = 0
-        start_w_A = 0
-        start_h_B = 0
-        start_w_B = 0
-        current_layer_divided_border_A = []
-        current_layer_divided_border_B = []
-        # A和b是分别切分的。除了相乘边需要保持一致外，其他边不需要一致。
-        # 先切分A
-        while(True):
-            if(height_A - start_h_A >= max_len_support and
-                width_A - start_w_A >= max_len_support):
-                # 如果足够切出来最大的块
-                cut_height = max_len_support
-                cut_width = max_len_support
-            else:
-                # 如果不足够切出来最大的块
-                if(height_A - start_h_A < max_len_support and
-                    width_A - start_w_A < max_len_support):
-                    # 如果height和width都不够
-                    cut_height = fit_to_power_of_2(
-                        height_A - start_h_A, min_len_support)
-                    cut_width = fit_to_power_of_2(
-                        width_A - start_w_A, min_len_support)
-                elif(height_A - start_h_A < max_len_support):
-                    # 如果height不够
-                    cut_height = fit_to_power_of_2(
-                        height_A - start_h_A, min_len_support)
-                    cut_width = max_len_support
-                elif(width_A - start_w_A < max_len_support):
-                    # 如果width不够
-                    cut_height = max_len_support
-                    cut_width = fit_to_power_of_2(
-                        width_A - start_w_A, min_len_support)
-                else:
-                    xxlog("Error when dividing matrix: height_A:%d, " \
-                        "start_h_A:%d, width_A:%d, start_w_A:%d, " \
-                        "max_len_support:%d"%(height_A, start_h_A, width_A, 
-                        start_w_A, max_len_support), XXError())
-                    raise ValueError("Error when dividing matrix")
-            # 保存切分结果
-            current_layer_divided_border_A.append(
-                [start_h_A, start_h_A+cut_height, 
-                    start_w_A, start_w_A+cut_width]
-            )
-            xxlog("Cut [%d:%d, %d:%d] from A"%(
-                current_layer_divided_border_A[-1][0], 
-                current_layer_divided_border_A[-1][1],
-                current_layer_divided_border_A[-1][2],
-                current_layer_divided_border_A[-1][3]))
-            # 修改下一次切分起始点
-            if(start_w_A + cut_width >= width_A):
-                # width方向达到最大值，需要换行
-                if(start_h_A + cut_height >= height_A):
-                    # 如果height方向也达到最大值，结束
-                    break
-                else:
-                    start_h_A += cut_height
-                    start_w_A = 0
-            else:
-                start_w_A += cut_width
-        # 再切分B
-        while(True):
-            if(height_B - start_h_B >= max_len_support and
-                width_B - start_w_B >= max_len_support):
-                # 如果足够切出来最大的块
-                cut_height = max_len_support
-                cut_width = max_len_support
-            else:
-                # 如果不足够切出来最大的块
-                if(height_B - start_h_B < max_len_support and
-                    width_B - start_w_B < max_len_support):
-                    # 如果height和width都不够
-                    cut_height = fit_to_power_of_2(
-                        height_B - start_h_B, min_len_support)
-                    cut_width = fit_to_power_of_2(
-                        width_B - start_w_B, min_len_support)
-                elif(height_B - start_h_B < max_len_support):
-                    # 如果height不够
-                    cut_height = fit_to_power_of_2(
-                        height_B - start_h_B, min_len_support)
-                    cut_width = max_len_support
-                elif(width_B - start_w_B < max_len_support):
-                    # 如果width不够
-                    cut_height = max_len_support
-                    cut_width = fit_to_power_of_2(
-                        width_B - start_w_B, min_len_support)
-                else:
-                    xxlog("Error when dividing matrix: height_B:%d, " \
-                        "start_h_B:%d, width_B:%d, start_w_B:%d, " \
-                        "max_len_support:%d"%(height_B, start_h_B, width_B, 
-                        start_w_B, max_len_support), XXError())
-                    raise ValueError("Error when dividing matrix")
-            # 保存切分结果
-            current_layer_divided_border_B.append(
-                [start_h_B, start_h_B+cut_height, 
-                    start_w_B, start_w_B+cut_width]
-            )
-            xxlog("Cut [%d:%d, %d:%d] from B"%(
-                current_layer_divided_border_B[-1][0], 
-                current_layer_divided_border_B[-1][1],
-                current_layer_divided_border_B[-1][2],
-                current_layer_divided_border_B[-1][3]))
-            # 修改下一次切分起始点
-            if(start_w_B + cut_width >= width_B):
-                # width方向达到最大值，需要换行
-                if(start_h_B + cut_height >= height_B):
-                    # 如果height方向也达到最大值，结束
-                    break
-                else:
-                    start_h_B += cut_height
-                    start_w_B = 0
-            else:
-                start_w_B += cut_width
-        divided_border.append((current_layer_divided_border_A,
-            current_layer_divided_border_B))
-    xxlog("Divide im2col matrix finished")
+    divided_border = cut_im2col_matrix(
+        im2col_shape,
+        calculation_graph,
+        max_len_support,
+        min_len_support
+    )
 
     
     '''
@@ -1607,11 +1609,15 @@ def analyse_resources_second_time(
 ):
     xxlog("Analysing resource second time...")
 
-    is_c_fulled_used = first_tensor_expression["is_c_fulled_used"]
-    if(True or is_c_fulled_used):
+    
+    # 读取first_tensor_expression的结果
+    is_C_fulled_used = first_tensor_expression["is_c_fulled_used"]
+    C_max_usage = first_tensor_expression["c_max_usage"]
+
+    if(is_C_fulled_used):
         # 如果C已经占满，则返回原来结果以及不需要更激进的分配
-        first_analyse_result_copy = first_analyse_result.copy()
-        first_analyse_result_copy["more_radical_allocation"] = False
+        second_analyse_result = first_analyse_result.copy()
+        second_analyse_result["more_radical_allocation"] = False
         xxlog("Found C fully used. Keep old allocation. No more radical " \
             "allocation. The result is shown below:\n" \
             "\tComplete bram group: %d\n" \
@@ -1625,15 +1631,359 @@ def analyse_resources_second_time(
             "\tTotal lut need: %d\n" \
             "\tLut avaliable: %d\n" \
             "\tMore radical allocation: %s"%(
-            first_analyse_result_copy["bram_group"], 
-            first_analyse_result_copy["bram_col_c_need_per_bram_group"], 
-            first_analyse_result_copy["depth_c_need_per_bram_col"], 
-            first_analyse_result_copy["total_bram_need"], 
-            first_analyse_result_copy["bram_avaliable"], 
-            first_analyse_result_copy["max_matrix_len_support"], 
-            first_analyse_result_copy["min_matrix_len_support"], 
-            first_analyse_result_copy["calc_unit_per_bram_group"], 
-            first_analyse_result_copy["total_lut_need"], 
-            first_analyse_result_copy["lut_avaliable"],
-            first_analyse_result_copy["more_radical_allocation"]))
-        return first_analyse_result_copy
+            second_analyse_result["bram_group"],
+            second_analyse_result["bram_col_c_need_per_bram_group"],
+            second_analyse_result["depth_c_need_per_bram_col"],
+            second_analyse_result["total_bram_need"],
+            second_analyse_result["bram_avaliable"],
+            second_analyse_result["max_matrix_len_support"],
+            second_analyse_result["min_matrix_len_support"],
+            second_analyse_result["calc_unit_per_bram_group"],
+            second_analyse_result["total_lut_need"],
+            second_analyse_result["lut_avaliable"],
+            second_analyse_result["more_radical_allocation"]))
+        return second_analyse_result
+    
+    # 如果C没有占满
+    xxlog("Found C not fully used, try to decrease C usage")
+    # C最大使用量除以bram组数得到每组bram中C的用量
+    old_bram_group = first_analyse_result["bram_group"]
+    C_usage_per_bram_group = C_max_usage if(old_bram_group == 0) else \
+        math.ceil(C_max_usage / old_bram_group)
+    xxlog("C usage per bram group: %d"%(C_usage_per_bram_group))
+
+    # 再除以每组bram列数得到每列bram中C的用量
+    old_bram_col_C_need_per_bram_group = first_analyse_result[
+        "bram_col_c_need_per_bram_group"]
+    C_usage_per_bram_col = math.ceil(C_usage_per_bram_group / 
+        old_bram_col_C_need_per_bram_group)
+    xxlog("C usage per bram col: %d"%(C_usage_per_bram_col))
+    
+    # 再除以8字节，得到每列需要的深度
+    C_depth_per_bram_col = C_usage_per_bram_col // 8
+    xxlog("C depth per bram col: %d"%(C_depth_per_bram_col))
+    
+    # 向上扩展到512的倍数
+    C_depth_per_bram_col_extend_to_512n = math.ceil(
+        C_depth_per_bram_col / 512) * 512
+    xxlog("C depth per bram col after extend to 512n: %d"%(
+        C_depth_per_bram_col_extend_to_512n))
+    
+    # 查表得到C需要每列bram的块数
+    C_bram36_need_per_col, C_bram18_need_per_col = get_bram_usage(
+        64, C_depth_per_bram_col_extend_to_512n)
+    xxlog("bram36 need per col: %d, bram18 need per col: %d"%(
+        C_bram36_need_per_col, C_bram18_need_per_col))
+    
+    # 乘以C需要的每组列数和组数得到C需要的bram总数
+    C_bram36_need = C_bram36_need_per_col * \
+        old_bram_col_C_need_per_bram_group if(old_bram_group == 0) else \
+        C_bram36_need_per_col * old_bram_col_C_need_per_bram_group * \
+        old_bram_group
+    C_bram18_need = C_bram18_need_per_col * \
+        old_bram_col_C_need_per_bram_group if(old_bram_group == 0) else \
+        C_bram18_need_per_col * old_bram_col_C_need_per_bram_group * \
+        old_bram_group
+    xxlog("bram36 need: %d, bram18 need: %d"%(C_bram36_need, C_bram18_need))
+    
+    # 求C需要的bram总数
+    C_bram_need = C_bram36_need + math.ceil(C_bram18_need / 2)
+    xxlog("C bram need: %d"%(C_bram_need))
+    
+    # 读取bram可用容量
+    bram_avaliable = first_analyse_result["bram_avaliable"]
+    xxlog("bram avaliable: %d"%(bram_avaliable))
+    
+    # bram可用容量减去C的占用，得到可给AB使用的容量
+    bram_for_AB = bram_avaliable - C_bram_need
+    xxlog("bram can used by A and B: %d"%(bram_for_AB))
+    
+    # 分为两份得到A可用容量
+    bram_for_A = bram_for_AB // 2
+    bram_for_B = bram_for_AB // 2
+    xxlog("bram can used by A or B: %d"%(bram_for_A))
+    
+    # 计算最大支持的矩阵大小
+    xxlog("Finding max len support now...")
+    max_len_support = 8
+    bram_group = 0
+    while(True):
+        if(max_len_support // 8 <= bram_for_A):
+            max_len_support *= 2
+            xxlog("Set max_len_support to %d"%(max_len_support))
+        if(max_len_support // 8 > bram_for_A):
+            xxlog("Found max_len_support exceed the max value bram can " \
+                "support")
+            max_len_support //= 2
+            xxlog("Decrease max_len_support to %d"%(max_len_support))
+            break
+        if(max_len_support == 512):
+            xxlog("Found max_len_support reach 512. Set bram_group to 1")
+            bram_group += 1
+            break
+    xxlog("Now max_len_support: %d. Bram_group: %d"%(
+        max_len_support, bram_group))
+    if(bram_group > 0):
+        xxlog("Since bram_group > 0, try to increase group number")
+        while(True):
+            if(bram_group * 64 <= bram_for_A):
+                xxlog("Set bram_group to %d"%(bram_group))
+                bram_group *= 2
+            if(bram_group * 64 > bram_for_A):
+                xxlog("Found bram_group exceed the max value bram can support")
+                bram_group //= 2
+                xxlog("Decrease bram_group to %d"%(bram_group))
+                break
+    xxlog("Now max_len_support: %d, bram_group: %d"%(
+        max_len_support, bram_group))
+    if(bram_group >= 4):
+        xxlog("Found bram group >= 4, try to merge bram_group")
+        while(bram_group >= 4):
+            bram_group //= 4
+            max_len_support *= 2
+            xxlog("Merge bram_group to %d, max_len_support to %d"%(
+                bram_group, max_len_support))
+    
+    # 相比于原来的，最大矩阵大小是否已经提高了一级
+    xxlog("Judging if the max_len_support is increased")
+    old_max_len_support = first_analyse_result["max_matrix_len_support"]
+    has_increased = False
+    if(bram_group == 0 and old_bram_group == 0):
+        if(max_len_support > old_max_len_support):
+            xxlog("New max_len_support is larger")
+            has_increased = True
+    if(bram_group >= 1 and old_bram_group == 0):
+        xxlog("New bram_group is larger")
+        has_increased = True
+    if(bram_group >= 1 and old_bram_group >= 1):
+        if(max_len_support > old_max_len_support):
+            xxlog("New max_len_support is larger")
+            has_increased = True
+        else:
+            if(bram_group > old_bram_group):
+                xxlog("New bram_group is larger")
+                has_increased = True
+    xxlog("Judge result: %s"%(has_increased))
+    
+    if(has_increased):
+        xxlog("Since max_len_support increased, check lut again")
+        # 如果矩阵大小提高了
+        '''
+        检查计算资源是否足够
+        '''
+        lut_need_per_mult = 61
+        lut_need_per_add = 8
+        lut_need_per_sub = 8
+        lut_counter_per_dsp = 25    # 每个dsp能够抵消的lut数量(估计值, 不一定准确)
+        total_mult = bram_group * max_len_support if(bram_group >= 1) else \
+            max_len_support
+        total_add = bram_group * (max_len_support-1) if(bram_group >= 1) else \
+            max_len_support-1
+        total_sub = bram_group * max_len_support * 2 if(bram_group >= 1) else \
+            max_len_support * 2
+        total_lut_need = (total_mult * lut_need_per_mult + 
+            total_add * lut_need_per_add + total_sub * lut_need_per_sub)
+        xxlog("Lut need(no consider dsp): %d. Lut avaliable: %d"%(
+            total_lut_need, int(lut_threshold*lut)))
+
+        if(total_lut_need > int(lut_threshold*lut)):
+            # 如果计算单元不够，返回最初的版本
+            xxlog("Lut is not enough under new condition")
+            xxlog("Go back to original condition")
+            second_analyse_result = first_analyse_result.copy()
+            second_analyse_result["more_radical_allocation"] = False
+            xxlog("Found C fully used. Keep old allocation. No more radical " \
+                "allocation. The result is shown below:\n" \
+                "\tComplete bram group: %d\n" \
+                "\tBram column C need per bram group: %d\n" \
+                "\tDepth C need per bram col: %d\n" \
+                "\tTotal bram need: %d\n" \
+                "\tBram avaliable: %d\n" \
+                "\tMax matrix len support: %d\n" \
+                "\tMin matrix len support: %d\n" \
+                "\tCalculation unit per bram group: %d\n" \
+                "\tTotal lut need: %d\n" \
+                "\tLut avaliable: %d\n" \
+                "\tMore radical allocation: %s"%(
+                second_analyse_result["bram_group"],
+                second_analyse_result["bram_col_c_need_per_bram_group"],
+                second_analyse_result["depth_c_need_per_bram_col"],
+                second_analyse_result["total_bram_need"],
+                second_analyse_result["bram_avaliable"],
+                second_analyse_result["max_matrix_len_support"],
+                second_analyse_result["min_matrix_len_support"],
+                second_analyse_result["calc_unit_per_bram_group"],
+                second_analyse_result["total_lut_need"],
+                second_analyse_result["lut_avaliable"],
+                second_analyse_result["more_radical_allocation"]))
+            return second_analyse_result
+
+        
+        calc_unit_per_bram_group = 1
+        if(total_lut_need - lut_counter_per_dsp*dsp <= int(lut_threshold*lut)):
+            # 如果资源充足，增加每个bram组的计算单元数量
+            xxlog("Try to double calculation unit")
+            while(True):
+                total_lut_need *= 2
+                calc_unit_per_bram_group *= 2
+                if(total_lut_need - lut_counter_per_dsp*dsp 
+                    <= int(lut_threshold*lut)):
+                    xxlog("Calculation unit per bram group: %d, " \
+                        "Total lut need: %d. Lut avaliable: %d"%(
+                            calc_unit_per_bram_group, total_lut_need,
+                            int(lut_threshold*lut)
+                        ))
+                else:
+                    # 此时已经用超了
+                    total_lut_need //= 2
+                    calc_unit_per_bram_group //= 2
+                    xxlog("First lut allocate finished: Calculation unit " \
+                        "per group: %d. Total lut need: %d. Lut avaliable: %d"%(
+                            calc_unit_per_bram_group, total_lut_need, 
+                            int(lut_threshold*lut)))
+                    break
+        
+        # 在新的max_len_support下，计算bram需求
+        xxlog("Calculating new bram allocation in new condition")
+        # 计算min_len_support
+        min_len_support = 8
+        while(min_len_support * min_len_support < max_len_support):
+            min_len_support *= 2
+        xxlog("Got min_len_support: %d"%(min_len_support))
+        # 重新切分im2col矩阵
+        divided_border = cut_im2col_matrix(
+            im2col_shape,
+            calculation_graph,
+            max_len_support,
+            min_len_support
+        )
+        # 在im2col矩阵中找相乘边最小的矩阵
+        xxlog("Finding min matrix block need to calculate...")
+        min_matrix_len = 2147483647
+        for layer in divided_border:
+            border_A = layer[0]
+            border_B = layer[1]
+            cut_result_A = []
+            for border in border_A:
+                if(border[0] == 0):
+                    cut_result_A.append(border[3] - border[2])
+            current_layer_min_matrix_len = min(cut_result_A)
+            min_matrix_len = min(min_matrix_len, current_layer_min_matrix_len)
+        xxlog("Min matrix block need to calculate is %d"%(min_matrix_len))
+        # 每组bram，每组计算单元每周期输出结果数
+        result_per_bram_group_per_calc_unit = max_len_support // min_matrix_len
+        xxlog("result number per bram_group per calc_unit: %d"%(
+            result_per_bram_group_per_calc_unit))
+        # 每组bram每周期输出结果数
+        result_per_bram_group = result_per_bram_group_per_calc_unit * \
+            calc_unit_per_bram_group
+        xxlog("result number per bram_group: %d"%(result_per_bram_group))
+        # C需要每组bram的列数
+        result_per_bram = 2
+        bram_col_C_need_per_bram_group = result_per_bram_group // \
+            result_per_bram
+        xxlog("bram col C need per bram group: %d"%(
+            bram_col_C_need_per_bram_group))
+        # AB需要的bram数
+        bram_A_need = max_len_support // 8 if(bram_group == 0) else \
+            (max_len_support // 8) * (max_len_support // 512) * bram_group
+        bram_B_need = max_len_support // 8 if(bram_group == 0) else \
+            (max_len_support // 8) * (max_len_support // 512) * bram_group
+        xxlog("bram A need: %d, bram B need: %d"%(bram_A_need, bram_B_need))
+        # C可用的Bram数
+        bram_avaliable_for_C = bram_avaliable - bram_A_need - bram_B_need
+        xxlog("bram avaliable for C: %d"%(bram_avaliable_for_C))
+        # C每组可用的bram数
+        bram_avaliable_for_C_per_bram_group = bram_avaliable_for_C \
+            if(bram_group == 0) else bram_avaliable_for_C // bram_group
+        xxlog("bram avaliable for C per bram group: %d"%(
+            bram_avaliable_for_C_per_bram_group))
+        # C每列可用bram数
+        bram_avaliable_for_C_per_col = round_to_half(
+            bram_avaliable_for_C_per_bram_group / \
+                bram_col_C_need_per_bram_group)
+        xxlog("bram avaliable for C per col: (%d, %d)"%(
+            bram_avaliable_for_C_per_col[0], bram_avaliable_for_C_per_col[1]))
+        # C需要bram的深度(后续把空余的bram都分给C后计算)
+        depth_C_need_per_bram_col = get_bram_depth(64, 
+            bram_avaliable_for_C_per_col)
+        xxlog("depth C need per bram col: %d"%(depth_C_need_per_bram_col))
+        # 根据深度重新计算每列需要的Bram数
+        C_bram36_need_per_col, C_bram18_need_per_col = get_bram_usage(64, 
+            depth_C_need_per_bram_col)
+        xxlog("bram36 C need per col: %d, bram18 C need per col: %d"%(
+            C_bram36_need_per_col, C_bram18_need_per_col))
+        # 每组需要的bram数
+        C_bram36_need_per_group = C_bram36_need_per_col * \
+            bram_col_C_need_per_bram_group
+        C_bram18_need_per_group = C_bram18_need_per_col * \
+            bram_col_C_need_per_bram_group
+        xxlog("bram36 C need per group: %d, bram18 C need per group: %d"%(
+            C_bram36_need_per_group, C_bram18_need_per_group))
+        # 最终分给C的bram数
+        bram_C_need = (C_bram36_need_per_group + math.ceil(
+            C_bram18_need_per_group / 2)) if(bram_group == 0) else \
+            (C_bram36_need_per_group + math.ceil(C_bram18_need_per_group / 
+            2)) * bram_group
+        xxlog("bram C need: %d"%(bram_C_need))
+        # 需要的总bram数
+        total_bram_need = bram_A_need + bram_B_need + bram_C_need
+        xxlog("total_bram_need: %d"%(total_bram_need))
+        # 是否更激进的分配
+        more_radical_allocation = False
+        # 如果bram足够
+        if(total_bram_need <= bram_avaliable):
+            # 创建返回结果
+            second_analyse_result = {}
+            second_analyse_result["bram_group"] = bram_group
+            second_analyse_result["bram_col_c_need_per_bram_group"] = \
+                bram_col_C_need_per_bram_group
+            second_analyse_result["depth_c_need_per_bram_col"] = \
+                depth_C_need_per_bram_col
+            second_analyse_result["total_bram_need"] = total_bram_need
+            second_analyse_result["bram_avaliable"] = bram_avaliable
+            second_analyse_result["max_matrix_len_support"] = max_len_support
+            second_analyse_result["min_matrix_len_support"] = min_len_support
+            second_analyse_result["calc_unit_per_bram_group"] = \
+                calc_unit_per_bram_group
+            second_analyse_result["total_lut_need"] = total_lut_need
+            second_analyse_result["lut_avaliable"] = first_analyse_result[
+                "lut_avaliable"]
+            second_analyse_result["more_radical_allocation"] = \
+                more_radical_allocation
+            return second_analyse_result
+        else:
+            # 如果bram带宽不够，返回最初的版本
+            # # 正常不应该到这里
+            xxlog("Bram bandwidth is not enough under new condition")
+            xxlog("Go back to original condition")
+            xxlog("Should not reach here in normal condition", XXWarning())
+            second_analyse_result = first_analyse_result.copy()
+            second_analyse_result["more_radical_allocation"] = False
+            xxlog("Found C fully used. Keep old allocation. No more radical " \
+                "allocation. The result is shown below:\n" \
+                "\tComplete bram group: %d\n" \
+                "\tBram column C need per bram group: %d\n" \
+                "\tDepth C need per bram col: %d\n" \
+                "\tTotal bram need: %d\n" \
+                "\tBram avaliable: %d\n" \
+                "\tMax matrix len support: %d\n" \
+                "\tMin matrix len support: %d\n" \
+                "\tCalculation unit per bram group: %d\n" \
+                "\tTotal lut need: %d\n" \
+                "\tLut avaliable: %d\n" \
+                "\tMore radical allocation: %s"%(
+                second_analyse_result["bram_group"],
+                second_analyse_result["bram_col_c_need_per_bram_group"],
+                second_analyse_result["depth_c_need_per_bram_col"],
+                second_analyse_result["total_bram_need"],
+                second_analyse_result["bram_avaliable"],
+                second_analyse_result["max_matrix_len_support"],
+                second_analyse_result["min_matrix_len_support"],
+                second_analyse_result["calc_unit_per_bram_group"],
+                second_analyse_result["total_lut_need"],
+                second_analyse_result["lut_avaliable"],
+                second_analyse_result["more_radical_allocation"]))
+            return second_analyse_result
+
+    # 如果矩阵大小没有提高
