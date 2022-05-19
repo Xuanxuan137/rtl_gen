@@ -35,6 +35,8 @@ if __name__ == "__main__":
     parser.add_argument("--try_increase_c_bandwidth", type=bool, default=True,
         help="Try increase C bandwidth to improve performance, " \
             "but may cause overuse of bram")
+    parser.add_argument("--optimize", type=int, default=2, help=
+        "Try to increase performance. May not effective")
 
     args = parser.parse_args()
     
@@ -50,6 +52,8 @@ if __name__ == "__main__":
     bram_threshold = args.BRAM_threshold
     lut_threshold = args.LUT_threshold
     data_on_chip = args.data_on_chip
+    try_increase_c_bandwidth = args.try_increase_c_bandwidth
+    optimize = args.optimize
     xxlog("Read model_dir: %s"%(model_dir))
     xxlog("Read project_part: %s"%(project_part))
     xxlog("Read lut: %s"%(lut))
@@ -59,6 +63,8 @@ if __name__ == "__main__":
     xxlog("Read bram usage threshold: %s"%(bram_threshold))
     xxlog("Read lut usage threshold: %s"%(lut_threshold))
     xxlog("Read data_on_chip: %s"%(data_on_chip))
+    xxlog("Read try increase C bandwidth: %s"%(try_increase_c_bandwidth))
+    xxlog("Read optimize: %d"%(optimize))
 
 
     known_parts = [
@@ -102,6 +108,8 @@ if __name__ == "__main__":
         dsp,
         bram_threshold,
         lut_threshold,
+        try_increase_c_bandwidth,
+        optimize,
         im2col_shape,
         calculation_graph
     )
@@ -154,12 +162,13 @@ if __name__ == "__main__":
         dsp,
         bram_threshold,
         lut_threshold,
+        try_increase_c_bandwidth,
+        optimize,
         im2col_shape,
         calculation_graph,
         first_analyse_result,
         first_tensor_expression
     )
-    print(second_analyse_result)
     '''
     second_analyse_result = {
         # bram组数(组边长小于512时，此值为0)
@@ -186,6 +195,24 @@ if __name__ == "__main__":
         "more_radical_allocation": more_radical_allocation   
     }
     '''
+
+    # 第二次拆分张量表达式
+    sencond_tensor_expression = analyser.split_tensor_expression_second_time(
+        project_part,
+        lut,
+        ff,
+        bram,
+        dsp,
+        bram_threshold,
+        lut_threshold,
+        try_increase_c_bandwidth,
+        optimize,
+        first_analyse_result,
+        first_tensor_expression,
+        second_analyse_result,
+        im2col_shape,
+        calculation_graph
+    )
 
     exit()
 
