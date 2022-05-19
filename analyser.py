@@ -1792,7 +1792,7 @@ def analyse_resources_second_time(
             xxlog("Go back to original condition")
             second_analyse_result = first_analyse_result.copy()
             second_analyse_result["more_radical_allocation"] = False
-            xxlog("Found C fully used. Keep old allocation. No more radical " \
+            xxlog("Lut not enough. Keep old allocation. No more radical " \
                 "allocation. The result is shown below:\n" \
                 "\tComplete bram group: %d\n" \
                 "\tBram column C need per bram group: %d\n" \
@@ -1934,6 +1934,8 @@ def analyse_resources_second_time(
         # 如果bram足够
         if(total_bram_need <= bram_avaliable):
             # 创建返回结果
+            xxlog("Resource is enough to increase bram bandwidth.")
+            xxlog("Return new result")
             second_analyse_result = {}
             second_analyse_result["bram_group"] = bram_group
             second_analyse_result["bram_col_c_need_per_bram_group"] = \
@@ -1960,8 +1962,8 @@ def analyse_resources_second_time(
             xxlog("Should not reach here in normal condition", XXWarning())
             second_analyse_result = first_analyse_result.copy()
             second_analyse_result["more_radical_allocation"] = False
-            xxlog("Found C fully used. Keep old allocation. No more radical " \
-                "allocation. The result is shown below:\n" \
+            xxlog("Bram bandwidth not enough. Keep old allocation. No more " \
+                "radical allocation. The result is shown below:\n" \
                 "\tComplete bram group: %d\n" \
                 "\tBram column C need per bram group: %d\n" \
                 "\tDepth C need per bram col: %d\n" \
@@ -1987,3 +1989,337 @@ def analyse_resources_second_time(
             return second_analyse_result
 
     # 如果矩阵大小没有提高
+    xxlog("Since max_len_support not increased, cut C more radical")
+    # 再从C中切出来10%
+    cut_more_C = int(C_bram_need * 0.1)
+    C_bram_need -= cut_more_C
+    xxlog("C bram need: %d"%(C_bram_need))
+    
+    # 重新检查
+    # 读取bram可用容量
+    bram_avaliable = first_analyse_result["bram_avaliable"]
+    xxlog("bram avaliable: %d"%(bram_avaliable))
+    
+    # bram可用容量减去C的占用，得到可给AB使用的容量
+    bram_for_AB = bram_avaliable - C_bram_need
+    xxlog("bram can used by A and B: %d"%(bram_for_AB))
+    
+    # 分为两份得到A可用容量
+    bram_for_A = bram_for_AB // 2
+    bram_for_B = bram_for_AB // 2
+    xxlog("bram can used by A or B: %d"%(bram_for_A))
+    
+    # 计算最大支持的矩阵大小
+    xxlog("Finding max len support now...")
+    max_len_support = 8
+    bram_group = 0
+    while(True):
+        if(max_len_support // 8 <= bram_for_A):
+            max_len_support *= 2
+            xxlog("Set max_len_support to %d"%(max_len_support))
+        if(max_len_support // 8 > bram_for_A):
+            xxlog("Found max_len_support exceed the max value bram can " \
+                "support")
+            max_len_support //= 2
+            xxlog("Decrease max_len_support to %d"%(max_len_support))
+            break
+        if(max_len_support == 512):
+            xxlog("Found max_len_support reach 512. Set bram_group to 1")
+            bram_group += 1
+            break
+    xxlog("Now max_len_support: %d. Bram_group: %d"%(
+        max_len_support, bram_group))
+    if(bram_group > 0):
+        xxlog("Since bram_group > 0, try to increase group number")
+        while(True):
+            if(bram_group * 64 <= bram_for_A):
+                xxlog("Set bram_group to %d"%(bram_group))
+                bram_group *= 2
+            if(bram_group * 64 > bram_for_A):
+                xxlog("Found bram_group exceed the max value bram can support")
+                bram_group //= 2
+                xxlog("Decrease bram_group to %d"%(bram_group))
+                break
+    xxlog("Now max_len_support: %d, bram_group: %d"%(
+        max_len_support, bram_group))
+    if(bram_group >= 4):
+        xxlog("Found bram group >= 4, try to merge bram_group")
+        while(bram_group >= 4):
+            bram_group //= 4
+            max_len_support *= 2
+            xxlog("Merge bram_group to %d, max_len_support to %d"%(
+                bram_group, max_len_support))
+    
+    # 相比于原来的，最大矩阵大小是否已经提高了一级
+    xxlog("Judging if the max_len_support is increased")
+    old_max_len_support = first_analyse_result["max_matrix_len_support"]
+    has_increased = False
+    if(bram_group == 0 and old_bram_group == 0):
+        if(max_len_support > old_max_len_support):
+            xxlog("New max_len_support is larger")
+            has_increased = True
+    if(bram_group >= 1 and old_bram_group == 0):
+        xxlog("New bram_group is larger")
+        has_increased = True
+    if(bram_group >= 1 and old_bram_group >= 1):
+        if(max_len_support > old_max_len_support):
+            xxlog("New max_len_support is larger")
+            has_increased = True
+        else:
+            if(bram_group > old_bram_group):
+                xxlog("New bram_group is larger")
+                has_increased = True
+    xxlog("Judge result: %s"%(has_increased))
+
+    if(not has_increased):
+        # 如果在再分配10%的条件下还是没有提高
+        xxlog("Bram bandwidth not increased even in more radical allocation")
+        xxlog("Return old allocation result")
+        second_analyse_result = first_analyse_result.copy()
+        second_analyse_result["more_radical_allocation"] = False
+        xxlog("Keep old allocation. No more radical " \
+            "allocation. The result is shown below:\n" \
+            "\tComplete bram group: %d\n" \
+            "\tBram column C need per bram group: %d\n" \
+            "\tDepth C need per bram col: %d\n" \
+            "\tTotal bram need: %d\n" \
+            "\tBram avaliable: %d\n" \
+            "\tMax matrix len support: %d\n" \
+            "\tMin matrix len support: %d\n" \
+            "\tCalculation unit per bram group: %d\n" \
+            "\tTotal lut need: %d\n" \
+            "\tLut avaliable: %d\n" \
+            "\tMore radical allocation: %s"%(
+            second_analyse_result["bram_group"],
+            second_analyse_result["bram_col_c_need_per_bram_group"],
+            second_analyse_result["depth_c_need_per_bram_col"],
+            second_analyse_result["total_bram_need"],
+            second_analyse_result["bram_avaliable"],
+            second_analyse_result["max_matrix_len_support"],
+            second_analyse_result["min_matrix_len_support"],
+            second_analyse_result["calc_unit_per_bram_group"],
+            second_analyse_result["total_lut_need"],
+            second_analyse_result["lut_avaliable"],
+            second_analyse_result["more_radical_allocation"]))
+        return second_analyse_result
+    
+    # 如果再分配10%的条件下提高了
+    '''
+    检查计算资源是否足够
+    '''
+    lut_need_per_mult = 61
+    lut_need_per_add = 8
+    lut_need_per_sub = 8
+    lut_counter_per_dsp = 25    # 每个dsp能够抵消的lut数量(估计值, 不一定准确)
+    total_mult = bram_group * max_len_support if(bram_group >= 1) else \
+        max_len_support
+    total_add = bram_group * (max_len_support-1) if(bram_group >= 1) else \
+        max_len_support-1
+    total_sub = bram_group * max_len_support * 2 if(bram_group >= 1) else \
+        max_len_support * 2
+    total_lut_need = (total_mult * lut_need_per_mult + 
+        total_add * lut_need_per_add + total_sub * lut_need_per_sub)
+    xxlog("Lut need(no consider dsp): %d. Lut avaliable: %d"%(
+        total_lut_need, int(lut_threshold*lut)))
+
+    if(total_lut_need > int(lut_threshold*lut)):
+        # 如果计算单元不够，返回最初的版本
+        xxlog("Lut is not enough under new condition")
+        xxlog("Go back to original condition")
+        second_analyse_result = first_analyse_result.copy()
+        second_analyse_result["more_radical_allocation"] = False
+        xxlog("Lut not enough. Keep old allocation. No more radical " \
+            "allocation. The result is shown below:\n" \
+            "\tComplete bram group: %d\n" \
+            "\tBram column C need per bram group: %d\n" \
+            "\tDepth C need per bram col: %d\n" \
+            "\tTotal bram need: %d\n" \
+            "\tBram avaliable: %d\n" \
+            "\tMax matrix len support: %d\n" \
+            "\tMin matrix len support: %d\n" \
+            "\tCalculation unit per bram group: %d\n" \
+            "\tTotal lut need: %d\n" \
+            "\tLut avaliable: %d\n" \
+            "\tMore radical allocation: %s"%(
+            second_analyse_result["bram_group"],
+            second_analyse_result["bram_col_c_need_per_bram_group"],
+            second_analyse_result["depth_c_need_per_bram_col"],
+            second_analyse_result["total_bram_need"],
+            second_analyse_result["bram_avaliable"],
+            second_analyse_result["max_matrix_len_support"],
+            second_analyse_result["min_matrix_len_support"],
+            second_analyse_result["calc_unit_per_bram_group"],
+            second_analyse_result["total_lut_need"],
+            second_analyse_result["lut_avaliable"],
+            second_analyse_result["more_radical_allocation"]))
+        return second_analyse_result
+
+    
+    calc_unit_per_bram_group = 1
+    if(total_lut_need - lut_counter_per_dsp*dsp <= int(lut_threshold*lut)):
+        # 如果资源充足，增加每个bram组的计算单元数量
+        xxlog("Try to double calculation unit")
+        while(True):
+            total_lut_need *= 2
+            calc_unit_per_bram_group *= 2
+            if(total_lut_need - lut_counter_per_dsp*dsp 
+                <= int(lut_threshold*lut)):
+                xxlog("Calculation unit per bram group: %d, " \
+                    "Total lut need: %d. Lut avaliable: %d"%(
+                        calc_unit_per_bram_group, total_lut_need,
+                        int(lut_threshold*lut)
+                    ))
+            else:
+                # 此时已经用超了
+                total_lut_need //= 2
+                calc_unit_per_bram_group //= 2
+                xxlog("First lut allocate finished: Calculation unit " \
+                    "per group: %d. Total lut need: %d. Lut avaliable: %d"%(
+                        calc_unit_per_bram_group, total_lut_need, 
+                        int(lut_threshold*lut)))
+                break
+
+    # 在新的max_len_support下，计算bram需求
+    xxlog("Calculating new bram allocation in new condition")
+    # 计算min_len_support
+    min_len_support = 8
+    while(min_len_support * min_len_support < max_len_support):
+        min_len_support *= 2
+    xxlog("Got min_len_support: %d"%(min_len_support))
+    # 重新切分im2col矩阵
+    divided_border = cut_im2col_matrix(
+        im2col_shape,
+        calculation_graph,
+        max_len_support,
+        min_len_support
+    )
+    # 在im2col矩阵中找相乘边最小的矩阵
+    xxlog("Finding min matrix block need to calculate...")
+    min_matrix_len = 2147483647
+    for layer in divided_border:
+        border_A = layer[0]
+        border_B = layer[1]
+        cut_result_A = []
+        for border in border_A:
+            if(border[0] == 0):
+                cut_result_A.append(border[3] - border[2])
+        current_layer_min_matrix_len = min(cut_result_A)
+        min_matrix_len = min(min_matrix_len, current_layer_min_matrix_len)
+    xxlog("Min matrix block need to calculate is %d"%(min_matrix_len))
+    # 每组bram，每组计算单元每周期输出结果数
+    result_per_bram_group_per_calc_unit = max_len_support // min_matrix_len
+    xxlog("result number per bram_group per calc_unit: %d"%(
+        result_per_bram_group_per_calc_unit))
+    # 每组bram每周期输出结果数
+    result_per_bram_group = result_per_bram_group_per_calc_unit * \
+        calc_unit_per_bram_group
+    xxlog("result number per bram_group: %d"%(result_per_bram_group))
+    # C需要每组bram的列数
+    result_per_bram = 2
+    bram_col_C_need_per_bram_group = result_per_bram_group // \
+        result_per_bram
+    xxlog("bram col C need per bram group: %d"%(
+        bram_col_C_need_per_bram_group))
+    # AB需要的bram数
+    bram_A_need = max_len_support // 8 if(bram_group == 0) else \
+        (max_len_support // 8) * (max_len_support // 512) * bram_group
+    bram_B_need = max_len_support // 8 if(bram_group == 0) else \
+        (max_len_support // 8) * (max_len_support // 512) * bram_group
+    xxlog("bram A need: %d, bram B need: %d"%(bram_A_need, bram_B_need))
+    # C可用的Bram数
+    bram_avaliable_for_C = bram_avaliable - bram_A_need - bram_B_need
+    xxlog("bram avaliable for C: %d"%(bram_avaliable_for_C))
+    # C每组可用的bram数
+    bram_avaliable_for_C_per_bram_group = bram_avaliable_for_C \
+        if(bram_group == 0) else bram_avaliable_for_C // bram_group
+    xxlog("bram avaliable for C per bram group: %d"%(
+        bram_avaliable_for_C_per_bram_group))
+    # C每列可用bram数
+    bram_avaliable_for_C_per_col = round_to_half(
+        bram_avaliable_for_C_per_bram_group / \
+            bram_col_C_need_per_bram_group)
+    xxlog("bram avaliable for C per col: (%d, %d)"%(
+        bram_avaliable_for_C_per_col[0], bram_avaliable_for_C_per_col[1]))
+    # C需要bram的深度(后续把空余的bram都分给C后计算)
+    depth_C_need_per_bram_col = get_bram_depth(64, 
+        bram_avaliable_for_C_per_col)
+    xxlog("depth C need per bram col: %d"%(depth_C_need_per_bram_col))
+    # 根据深度重新计算每列需要的Bram数
+    C_bram36_need_per_col, C_bram18_need_per_col = get_bram_usage(64, 
+        depth_C_need_per_bram_col)
+    xxlog("bram36 C need per col: %d, bram18 C need per col: %d"%(
+        C_bram36_need_per_col, C_bram18_need_per_col))
+    # 每组需要的bram数
+    C_bram36_need_per_group = C_bram36_need_per_col * \
+        bram_col_C_need_per_bram_group
+    C_bram18_need_per_group = C_bram18_need_per_col * \
+        bram_col_C_need_per_bram_group
+    xxlog("bram36 C need per group: %d, bram18 C need per group: %d"%(
+        C_bram36_need_per_group, C_bram18_need_per_group))
+    # 最终分给C的bram数
+    bram_C_need = (C_bram36_need_per_group + math.ceil(
+        C_bram18_need_per_group / 2)) if(bram_group == 0) else \
+        (C_bram36_need_per_group + math.ceil(C_bram18_need_per_group / 
+        2)) * bram_group
+    xxlog("bram C need: %d"%(bram_C_need))
+    # 需要的总bram数
+    total_bram_need = bram_A_need + bram_B_need + bram_C_need
+    xxlog("total_bram_need: %d"%(total_bram_need))
+    # 是否更激进的分配
+    more_radical_allocation = True
+    # 如果bram足够
+    if(total_bram_need <= bram_avaliable):
+        # 创建返回结果
+        xxlog("Resource is enough to increase bram bandwidth.")
+        xxlog("Return new result")
+        second_analyse_result = {}
+        second_analyse_result["bram_group"] = bram_group
+        second_analyse_result["bram_col_c_need_per_bram_group"] = \
+            bram_col_C_need_per_bram_group
+        second_analyse_result["depth_c_need_per_bram_col"] = \
+            depth_C_need_per_bram_col
+        second_analyse_result["total_bram_need"] = total_bram_need
+        second_analyse_result["bram_avaliable"] = bram_avaliable
+        second_analyse_result["max_matrix_len_support"] = max_len_support
+        second_analyse_result["min_matrix_len_support"] = min_len_support
+        second_analyse_result["calc_unit_per_bram_group"] = \
+            calc_unit_per_bram_group
+        second_analyse_result["total_lut_need"] = total_lut_need
+        second_analyse_result["lut_avaliable"] = first_analyse_result[
+            "lut_avaliable"]
+        second_analyse_result["more_radical_allocation"] = \
+            more_radical_allocation
+        return second_analyse_result
+    else:
+        # 如果bram带宽不够，返回最初的版本
+        # # 正常不应该到这里
+        xxlog("Bram bandwidth is not enough under new condition")
+        xxlog("Go back to original condition")
+        xxlog("Should not reach here in normal condition", XXWarning())
+        second_analyse_result = first_analyse_result.copy()
+        second_analyse_result["more_radical_allocation"] = False
+        xxlog("Bram bandwidth not enough. Keep old allocation. No more " \
+            "radical allocation. The result is shown below:\n" \
+            "\tComplete bram group: %d\n" \
+            "\tBram column C need per bram group: %d\n" \
+            "\tDepth C need per bram col: %d\n" \
+            "\tTotal bram need: %d\n" \
+            "\tBram avaliable: %d\n" \
+            "\tMax matrix len support: %d\n" \
+            "\tMin matrix len support: %d\n" \
+            "\tCalculation unit per bram group: %d\n" \
+            "\tTotal lut need: %d\n" \
+            "\tLut avaliable: %d\n" \
+            "\tMore radical allocation: %s"%(
+            second_analyse_result["bram_group"],
+            second_analyse_result["bram_col_c_need_per_bram_group"],
+            second_analyse_result["depth_c_need_per_bram_col"],
+            second_analyse_result["total_bram_need"],
+            second_analyse_result["bram_avaliable"],
+            second_analyse_result["max_matrix_len_support"],
+            second_analyse_result["min_matrix_len_support"],
+            second_analyse_result["calc_unit_per_bram_group"],
+            second_analyse_result["total_lut_need"],
+            second_analyse_result["lut_avaliable"],
+            second_analyse_result["more_radical_allocation"]))
+        return second_analyse_result
