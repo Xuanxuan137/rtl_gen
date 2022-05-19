@@ -197,7 +197,7 @@ if __name__ == "__main__":
     '''
 
     # 第二次拆分张量表达式
-    sencond_tensor_expression = analyser.split_tensor_expression_second_time(
+    second_tensor_expression = analyser.split_tensor_expression_second_time(
         project_part,
         lut,
         ff,
@@ -213,6 +213,19 @@ if __name__ == "__main__":
         im2col_shape,
         calculation_graph
     )
+    print(second_tensor_expression)
+    '''
+    return {
+        # 资源分配结果
+        "resource_analyse_result": second_analyse_result,
+        # 张量表达式
+        "tensor_expr": tensor_expr,
+        # 计算流程
+        "calc_process": calc_process,
+        # C最大使用量
+        "c_max_usage": c_max_usage
+    }
+    '''
 
     exit()
 

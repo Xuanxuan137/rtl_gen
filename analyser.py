@@ -5,9 +5,10 @@ import numpy as np
 import op
 from util import *
 
+
 def round_to_half(value):
     '''
-    取整到0.5，返回tuple
+    取整到0.5, 返回tuple: (整数部分    ,    1表示有0.5,0表示0)
     '''
     integer = int(value)
     half = 1 if(value - integer >= 0.5) else 0
@@ -16,7 +17,7 @@ def round_to_half(value):
 
 def is_large_matrix(matrix_space):
     '''
-    判断是否是大矩阵
+    判断是否是大矩阵(大于等于16384)
     '''
     if(matrix_space >= 16384):
         return True
@@ -26,7 +27,7 @@ def is_large_matrix(matrix_space):
 def get_bram_usage(width, depth):
     '''
     根据bram位宽和深度获取bram使用量
-    由于不知道xilinx是怎么计算bram用量的，这一步目前只能查表
+    由于不知道xilinx是怎么计算bram用量的, 这一步目前只能查表
     '''
     if(width == 64):
         usage = {
@@ -87,7 +88,7 @@ def get_bram_usage(width, depth):
 def get_bram_depth(width, usage):
     '''
     根据bram位宽和用量获取可用bram深度
-    由于不知道xilinx是怎么计算bram用量的，这一步目前只能查表
+    由于不知道xilinx是怎么计算bram用量的, 这一步目前只能查表
     这个不太靠谱，勉强用吧
     '''
     if(width == 64):
@@ -289,10 +290,10 @@ def fit_to_power_of_2(value, min_len_support):
     min_len_support: 片上的最小矩阵边长
     用于在切分矩阵时将矩阵边长适应到2的幂
     方法：
-    1. 如果已经是2的幂，且不小于min_len_support，直接返回
-    2. 如果小于min_len_support，则向上扩展到min_len_support
-    3. 否则，如果小于64，则向上扩展到最近的2的幂
-    4. 否则，如果大于下一级2的幂与上一级2的幂的中点，则向上扩展，否则向下压缩
+    1. 如果已经是2的幂, 且不小于min_len_support, 直接返回
+    2. 如果小于min_len_support, 则向上扩展到min_len_support
+    3. 否则, 如果小于64, 则向上扩展到最近的2的幂
+    4. 否则, 如果大于下一级2的幂与上一级2的幂的中点, 则向上扩展, 否则向下压缩
     '''
     if(is_power_of_2(value) and value>=min_len_support):
         return value
@@ -321,6 +322,8 @@ def cut_im2col_matrix(
 ):
     '''
     将im2col后的矩阵切块
+    切块原则, 在横向或纵向上, 尽可能按照max_len_support切, 即尽可能切大块
+    如果剩余的边长不够切最大块, 则按照fit_to_power_of_2原则切
     '''
     original_shape = []
     xxlog("Copy im2col_shape to original_shape...")
@@ -992,6 +995,34 @@ def plan_calc_process(
     return total_tensor_expr_with_transport_plan, C_max_usage
 
 
+def calc_cost(
+    divided_border,
+    submatrix_size,
+    tensor_expr,
+    calc_process
+):
+    '''
+    计算当前计算流程的开销
+    为了计算开销, 将原始的load, calc, store指令转换为
+    copy: 复制内存, 包括普通到dma_shared, 也包括dma_shared到普通
+    set_dma: 配置dma, 启动传输
+    load: dma_shared到片上
+    calc: 计算
+    store: 片上到dma_shared
+    因为load+calc和copy是可以同时进行的, 所以转换后的指令应该是两条线
+    不能同时执行的, 比如set_dma, 以及虽然可以同时执行但当前不需要并行的, 只使用左线
+    能同时执行的, 比如load+calc和copy, 分别放在左线和有线
+    那么, 转换之后的指令应为以下状态:
+    整体为一个list, 里面是多个list, 每个是一层的指令
+    每个list里包含多个tuple, 表示一组指令
+    tuple中分别为指令的左线和右线
+    '''
+    cost = 0
+    for layer_index, layer in enumerate(calc_process):
+        
+    exit()
+
+
 def analyse_resources_first_time(
     project_part,
     lut,
@@ -1636,340 +1667,33 @@ def split_tensor_expression_first_time(
     # 如果没找到结果边均达到max_len_support的矩阵，说明C可能无法占满
     # 寻找C的最大使用量
     xxlog("Founding the max usage of C")
-    C_max_usage = 0
-    for layer_index, layer in enumerate(submatrix_size):
-        # 将当前层拆分为张量表达式
-        # C_0_0 = A_0_0 * B_0_0 + A_0_1 * B_1_0 + ...
-        xxlog("Dividing current layer into tensor expression")
-        submatrix_size_A = layer[0]
-        submatrix_size_B = layer[1]
-        tensor_expr = []
-        shape_A = (len(submatrix_size_A), len(submatrix_size_A[0]))
-        shape_B = (len(submatrix_size_B), len(submatrix_size_B[0]))
-        M = shape_A[0]
-        N = shape_B[1]
-        K = shape_A[1]
-        for m in range(M):
-            for n in range(N):
-                string = "C_%d_%d="%(m, n)
-                for k in range(K):
-                    if(k == 0):
-                        string += "A_%d_%d*B_%d_%d"%(m, k, k, n)
-                    else:
-                        string += "+A_%d_%d*B_%d_%d"%(m, k, k, n)
-                tensor_expr.append(string)
-        xxlog("Dividing tensor expression finished: %s"%(tensor_expr))
-
-        # 目前当前层已经拆分为张量表达式，规划其计算流程
-        # 原则上，数据量大于等于16384(128x128)的矩阵单传更划算，
-        #   小于该值的合并传更划算
-        # 那么考虑以下四种情况
-        # 1. 连续的小矩阵，攒到16384或填满ABC中的一个停止
-        # 2. 连续的大矩阵。单独传输
-        # 3. 连续的小矩阵后是大矩阵。若小矩阵不够16384且空间足够，尝试将大矩阵加入进去
-        # 4. 大矩阵后是连续的小矩阵。如果小矩阵数量少且大矩阵未达最大限制，尝试加入进去
-        # 在规划过程中，一定不跨层规划。对于跨C块规划问题：如果当前容量能够将下一个C块
-        # 完整地容纳进来，则容纳，否则不跨C块。
-
-        # 当前一次传输中，计划传输的A矩阵和B矩阵。完成一次传输就要清空
-        # 以及计划计算的C矩阵
-        A_in_plan = []
-        B_in_plan = []
-        C_in_plan = []
-        calc_in_plan = []
-        # 当前传输规划中，ABC已经累积的空间
-        A_accumulate_space = 0
-        B_accumulate_space = 0
-        C_accumulate_space = 0
-        # ABC的容量
-        bram_group = first_analyse_result["bram_group"]
-        depth_per_bram = 512
-        bram_col_C_need_per_bram_group = first_analyse_result[
-            "bram_col_c_need_per_bram_group"]
-        depth_c_need_per_bram_col = first_analyse_result[
-            "depth_c_need_per_bram_col"]
-        A_capacity = max_len_support*depth_per_bram if(max_len_support < 512) \
-            else (max_len_support*max_len_support*bram_group)
-        B_capacity = max_len_support*depth_per_bram if(max_len_support < 512) \
-            else (max_len_support*max_len_support*bram_group)
-        C_capacity = bram_col_C_need_per_bram_group * \
-            depth_c_need_per_bram_col * 8 if(bram_group == 0) else \
-            bram_col_C_need_per_bram_group * depth_c_need_per_bram_col * \
-            bram_group * 8
-        xxlog("Got the capaticy of A, B, C: %d, %d, %d"%(
-            A_capacity, B_capacity, C_capacity))
-        xxlog("im2col shape: A: %s, B: %s"%(original_shape[layer_index][0], 
-            original_shape[layer_index][1]))
-        # 按照传输规划的张量表达式
-        tensor_expr_with_transport_plan = []
-
-        def split_adder(adder):
-            # 拆分adder分析数据
-            multer_A = adder.split("*")[0]
-            multer_B = adder.split("*")[1]
-            index_A = [int(i) for i in multer_A.split("_")[1:3]]
-            index_B = [int(i) for i in multer_B.split("_")[1:3]]
-            size_A = submatrix_size_A[index_A[0]][index_A[1]]
-            size_B = submatrix_size_B[index_B[0]][index_B[1]]
-            size_C = (size_A[0], size_B[1])
-            space_A = size_A[0] * size_A[1]
-            space_B = size_B[0] * size_B[1]
-            space_C = size_C[0] * size_C[1] * 4
-            return multer_A, multer_B, index_A, index_B, size_A, size_B, \
-                size_C, space_A, space_B, space_C
-            
-        def check_space(multer_A, multer_B, block_C, 
-            space_A, space_B, space_C):
-            # 检查加入当前矩阵后片上空间是否足够
-            A_capacity_need = A_accumulate_space
-            if(multer_A not in A_in_plan):
-                A_capacity_need += space_A
-            B_capacity_need = B_accumulate_space
-            if(multer_B not in B_in_plan):
-                B_capacity_need += space_B
-            C_capacity_need = C_accumulate_space
-            if(block_C not in C_in_plan):
-                C_capacity_need += space_C
-            if(A_capacity_need <= A_capacity and 
-               B_capacity_need <= B_capacity and
-               C_capacity_need <= C_capacity):
-                return True
-            return False
-        
-        def clear_plan():
-            # 清空计划表，并统计C的峰值占用(不清空C)
-            nonlocal A_in_plan, B_in_plan, C_in_plan, calc_in_plan
-            nonlocal A_accumulate_space, B_accumulate_space, C_accumulate_space
-            nonlocal tensor_expr_with_transport_plan
-            nonlocal C_max_usage
-            for i in A_in_plan:
-                tensor_expr_with_transport_plan.append("load " + i)
-            for i in B_in_plan:
-                tensor_expr_with_transport_plan.append("load " + i)
-            for i in calc_in_plan:
-                tensor_expr_with_transport_plan.append(i)
-            A_in_plan = []
-            B_in_plan = []
-            calc_in_plan = []
-            C_max_usage = max(C_max_usage, C_accumulate_space)
-            A_accumulate_space = 0
-            B_accumulate_space = 0
-            xxlog("Clear plan. C max usage: %d. Now tensor_expr: %s"%(
-                C_max_usage, tensor_expr_with_transport_plan))
-        
-        def write_back_C():
-            nonlocal C_in_plan, C_accumulate_space
-            for i in C_in_plan:
-                tensor_expr_with_transport_plan.append("store " + i)
-            C_in_plan = []
-            C_accumulate_space = 0
-            xxlog("Write back C. Now tensor_expr: %s"%(
-                tensor_expr_with_transport_plan))
-
-        def check_can_hold_next_C_block_all(C_block_index):
-            # 检查在当前情况的基础上，是否能把计算下一个C块(先检查是否还有下一个C块)
-            # 需要的内容全部存进来，且要求计算下一个C块中不含大矩阵，且B的占用不超65536
-            find_index = C_block_index + 1
-            if(find_index >= len(tensor_expr)):
-                # 没有下一个C块了，要求清空plan
-                return False
-            temp_tensor_expr = tensor_expr[find_index]
-            block_C = temp_tensor_expr.split("=")[0]
-            adders_str = temp_tensor_expr.split("=")[1]
-            adders = adders_str.split("+")
-            A_in_plan_copy = [i for i in A_in_plan]
-            B_in_plan_copy = [i for i in B_in_plan]
-            C_in_plan_copy = [i for i in C_in_plan]
-            A_accumulate_space_copy = A_accumulate_space
-            B_accumulate_space_copy = B_accumulate_space
-            C_accumulate_space_copy = C_accumulate_space
-            for adder in adders:
-                multer_A, multer_B, index_A, index_B, size_A, size_B, size_C, \
-                space_A, space_B, space_C = split_adder(adder)
-                if(is_large_matrix(space_B)):
-                    # 如果含大矩阵，要求清空plan
-                    return False
-                if(multer_A not in A_in_plan_copy):
-                    A_in_plan_copy.append(multer_A)
-                    A_accumulate_space_copy += space_A
-                if(multer_B not in B_in_plan_copy):
-                    B_in_plan_copy.append(multer_B)
-                    B_accumulate_space_copy += space_B
-                if(block_C not in C_in_plan_copy):
-                    C_in_plan_copy.append(block_C)
-                    C_accumulate_space_copy += space_C
-                if(A_accumulate_space_copy > A_capacity):
-                    return False
-                if(B_accumulate_space_copy > B_capacity or
-                   B_accumulate_space_copy > 65536):
-                    return False
-                if(C_accumulate_space_copy > C_capacity):
-                    return False
-            return True
-
-
-        for C_block_index, temp_tensor_expr in enumerate(tensor_expr):
-            xxlog("Traverse each tensor expression in current layer: %s"%(
-                temp_tensor_expr))
-            block_C = temp_tensor_expr.split("=")[0]
-            adders_str = temp_tensor_expr.split("=")[1]
-            adders = adders_str.split("+")
-            C_first_access = True
-
-            def add_to_plan(multer_A, multer_B, block_C, size_A, size_B,
-                size_C, space_A, space_B, space_C):
-                # 将当前块加入plan中
-                nonlocal A_in_plan, B_in_plan, C_in_plan, calc_in_plan
-                nonlocal A_accumulate_space, B_accumulate_space
-                nonlocal C_accumulate_space, C_first_access
-                if(multer_A not in A_in_plan):
-                    A_in_plan.append(multer_A)
-                    A_accumulate_space += space_A
-                if(multer_B not in B_in_plan):
-                    B_in_plan.append(multer_B)
-                    B_accumulate_space += space_B
-                if(block_C not in C_in_plan):
-                    C_in_plan.append(block_C)
-                    C_accumulate_space += space_C
-                if(C_first_access):
-                    C_first_access = False
-                    expr = block_C + "=" + multer_A + "*" + multer_B
-                else:
-                    expr = block_C + "+=" + multer_A + "*" + multer_B
-                if(expr not in calc_in_plan):
-                    calc_in_plan.append(expr)
-                xxlog("Add %s, %s, %s to plan. sizeA: %s, sizeB: %s, sizeC: " \
-                    "%s. spaceA:%d, spaceB:%d, spaceC:%d. usedA:%d, usedB:%d" \
-                    " usedC:%d. capacityA:%d, capacityB:%d, capacityC:%d, " \
-                    "now planA: %s, planB: %s, planC: %s, plan_calc: %s"%(
-                        multer_A, multer_B, block_C, size_A, size_B, size_C, 
-                        space_A, space_B, space_C, A_accumulate_space,
-                        B_accumulate_space, C_accumulate_space, A_capacity,
-                        B_capacity, C_capacity, A_in_plan, B_in_plan, 
-                        C_in_plan, calc_in_plan))
-            
-            def check_can_hold_all(adder_index):
-                # 检查下一个大矩阵或当前C块结束前的所有小矩阵是否能够全部装下，
-                # 且不超65536
-                A_in_plan_copy = [i for i in A_in_plan]
-                B_in_plan_copy = [i for i in B_in_plan]
-                C_in_plan_copy = [i for i in C_in_plan]
-                A_accumulate_space_copy = A_accumulate_space
-                B_accumulate_space_copy = B_accumulate_space
-                C_accumulate_space_copy = C_accumulate_space
-                find_index = adder_index + 1
-                while(find_index < len(adders)):
-                    adder = adders[find_index]
-                    multer_A, multer_B, index_A, index_B, size_A, size_B, \
-                    size_C, space_A, space_B, space_C = split_adder(adder)
-                    if(is_large_matrix(space_B)):
-                        break
-                    if(multer_A not in A_in_plan_copy):
-                        A_in_plan_copy.append(multer_A)
-                        A_accumulate_space_copy += space_A
-                    if(multer_B not in B_in_plan_copy):
-                        B_in_plan_copy.append(multer_B)
-                        B_accumulate_space_copy += space_B
-                    if(block_C not in C_in_plan_copy):
-                        C_in_plan_copy.append(block_C)
-                        C_accumulate_space_copy += space_C
-                    if(A_accumulate_space_copy > A_capacity or 
-                       B_accumulate_space_copy > B_capacity or 
-                       C_accumulate_space_copy > C_capacity or 
-                       B_accumulate_space_copy > 65536):
-                        return False
-                    find_index += 1
-                return True
-
-            for adder_index, adder in enumerate(adders):
-                xxlog("Traverse each pair of adders in current tensor " \
-                    "expression: %d: %s"%(adder_index, adder))
-                multer_A, multer_B, index_A, index_B, size_A, size_B, size_C, \
-                space_A, space_B, space_C = split_adder(adder)
-                if(is_large_matrix(space_B)):
-                    # 如果B是大矩阵
-                    if(len(A_in_plan) != 0 or len(B_in_plan) != 0):
-                        # 如果计划表不空
-                        can_hold = check_space(multer_A, multer_B, 
-                            block_C, space_A, space_B, space_C)
-                        if(can_hold):
-                            # 如果空间足够
-                            add_to_plan(multer_A, multer_B, block_C, size_A, 
-                                size_B, size_C, space_A, space_B, space_C)
-                            clear_plan()
-                            continue
-                        else:
-                            # 如果空间不够
-                            clear_plan()
-                            # 下一步交给计划表空的情况处理
-                    if(len(A_in_plan) == 0 and len(B_in_plan) == 0):
-                        # 如果计划表空(为了接住上面一行的结果，这里不用else)
-                        add_to_plan(multer_A, multer_B, block_C, size_A,
-                            size_B, size_C, space_A, space_B, space_C)
-                        if(adder_index+1 < len(adders)):
-                            # 如果还有下一对AB矩阵
-                            next_adder = adders[adder_index+1]
-                            multer_A_next, multer_B_next, index_A_next, \
-                            index_B_next, size_A_next, size_B_next, \
-                            size_C_next, space_A_next, space_B_next, \
-                            space_C_next = split_adder(next_adder)
-                            if(is_large_matrix(space_B_next)):
-                                # 如果下一个B是大矩阵
-                                clear_plan()
-                                continue
-                            else:
-                                # 如果下一对不是大矩阵
-                                continue
-                        else:
-                            # 如果没有下一对AB矩阵了
-                            clear_plan()
-                            continue
-                else:
-                    # 如果AB是小矩阵
-                    if(len(A_in_plan) == 0 and len(B_in_plan) == 0):
-                        # 如果计划表空
-                        add_to_plan(multer_A, multer_B, block_C, size_A, 
-                            size_B, size_C, space_A, space_B, space_C)
-                        continue
-                    else:
-                        # 如果计划表不空
-                        can_hold = check_space(multer_A, multer_B, block_C, 
-                            space_A, space_B, space_C)
-                        if(can_hold):
-                            # 如果空间足够
-                            add_to_plan(multer_A, multer_B, block_C, size_A,
-                                size_B, size_C, space_A, space_B, space_C)
-                            if(B_accumulate_space >= 16384):
-                                # 如果B使用容量达16384
-                                can_hold_all = check_can_hold_all(adder_index)
-                                if(can_hold_all):
-                                    # 如果能容纳后面的一系列小矩阵
-                                    continue
-                                else:
-                                    # 如果不能容纳后面的一系列小矩阵
-                                    clear_plan()
-                                    continue
-                            else:
-                                continue
-                        else:
-                            # 如果空间不够
-                            clear_plan()
-                            add_to_plan(multer_A, multer_B, block_C, size_A,
-                                size_B, size_C, space_A, space_B, space_C)
-                            continue
-            
-
-            # 遍历计算当前C块需要的每一对AB完成
-            can_hold_next_C_block_all = check_can_hold_next_C_block_all(
-                C_block_index)
-            if(can_hold_next_C_block_all):
-                continue
-            else:
-                clear_plan()
-                write_back_C()
-                continue
+    # 切分张量表达式
+    tensor_expr = split_tensor_expression(submatrix_size)
+    # 规划计算流程，同时寻找C最大使用量
+    bram_group = first_analyse_result["bram_group"]
+    depth_per_bram = 512
+    bram_col_C_need_per_bram_group = first_analyse_result[
+        "bram_col_c_need_per_bram_group"]
+    depth_c_need_per_bram_col = first_analyse_result[
+        "depth_c_need_per_bram_col"]
+    A_capacity = max_len_support*depth_per_bram if(max_len_support < 512) \
+        else (max_len_support*max_len_support*bram_group)
+    B_capacity = max_len_support*depth_per_bram if(max_len_support < 512) \
+        else (max_len_support*max_len_support*bram_group)
+    C_capacity = bram_col_C_need_per_bram_group * \
+        depth_c_need_per_bram_col * 8 if(bram_group == 0) else \
+        bram_col_C_need_per_bram_group * depth_c_need_per_bram_col * \
+        bram_group * 8
+    _, C_max_usage = plan_calc_process(
+        submatrix_size,
+        tensor_expr,
+        im2col_shape,
+        A_capacity,
+        B_capacity,
+        C_capacity
+    )
     
-    
+    # 返回结果
     C_fulled_used = True if(C_max_usage >= C_capacity) else False
     xxlog("First split tensor expression result: \n" \
         "\tis_c_fulled_used: %s\n" \
@@ -2839,7 +2563,7 @@ def split_tensor_expression_second_time(
     tensor_expr = split_tensor_expression(submatrix_size)
     
     # 规划计算流程
-    calc_process, _ = plan_calc_process(
+    calc_process, c_max_usage = plan_calc_process(
         submatrix_size,
         tensor_expr,
         im2col_shape,
@@ -2847,4 +2571,88 @@ def split_tensor_expression_second_time(
         B_capacity,
         C_capacity
     )
-    print(calc_process, _)
+
+    # 根据是否激进分配进行不同操作
+    if(False and not more_radical_allocation):
+        # 如果没有激进分配，直接返回结果
+        return {
+            # 资源分配结果
+            "resource_analyse_result": second_analyse_result,
+            # 张量表达式
+            "tensor_expr": tensor_expr,
+            # 计算流程
+            "calc_process": calc_process,
+            # C最大使用量
+            "c_max_usage": c_max_usage
+        }
+    
+    # 如果有激进分配，对两种方案进行比较
+
+    # 确定保守方案的参数
+    xxlog("Read conservative parameters from first analyse result")
+    conservative_bram_group = first_analyse_result["bram_group"]
+    conservative_max_len_support = first_analyse_result[
+        "max_matrix_len_support"]
+    conservative_min_len_support = first_analyse_result[
+        "min_matrix_len_support"]
+    conservative_bram_col_C_need_per_bram_group = first_analyse_result[
+        "bram_col_c_need_per_bram_group"]
+    conservative_depth_c_need_per_bram_col = first_analyse_result[
+        "depth_c_need_per_bram_col"]
+    conservative_total_bram_need = first_analyse_result["total_bram_need"]
+    conservative_calc_unit_per_bram_group = first_analyse_result[
+        "calc_unit_per_bram_group"]
+    depth_per_bram = 512
+    conservative_A_capacity = conservative_max_len_support*depth_per_bram if(
+        conservative_max_len_support < 512) else (conservative_max_len_support
+        *conservative_max_len_support*conservative_bram_group)
+    conservative_B_capacity = conservative_max_len_support*depth_per_bram if(
+        conservative_max_len_support < 512) else (conservative_max_len_support
+        *conservative_max_len_support*conservative_bram_group)
+    conservative_C_capacity = conservative_bram_col_C_need_per_bram_group * \
+        conservative_depth_c_need_per_bram_col * 8 if(conservative_bram_group
+        == 0) else conservative_bram_col_C_need_per_bram_group * \
+        conservative_depth_c_need_per_bram_col * conservative_bram_group * 8
+    
+    # 切分im2col矩阵
+    conservative_divided_border = cut_im2col_matrix(
+        im2col_shape,
+        calculation_graph,
+        conservative_max_len_support,
+        conservative_min_len_support
+    )
+
+    # 校验切分结果
+    check_divide_result(conservative_divided_border)
+
+    # 计算切分后的子矩阵边长
+    conservative_submatrix_size = get_submatrix_size(
+        conservative_divided_border)
+
+    # 拆分张量表达式
+    conservative_tensor_expr = split_tensor_expression(
+        conservative_submatrix_size)
+    
+    # 规划计算流程
+    conservative_calc_process, conservative_c_max_usage = plan_calc_process(
+        conservative_submatrix_size,
+        conservative_tensor_expr,
+        im2col_shape,
+        conservative_A_capacity,
+        conservative_B_capacity,
+        conservative_C_capacity
+    )
+
+    # 计算两种方式的开销
+    conservative_cost = calc_cost(
+        conservative_divided_border,
+        conservative_submatrix_size,
+        conservative_tensor_expr,
+        conservative_calc_process
+    )
+    radical_cost = calc_cost(
+        divided_border,
+        submatrix_size,
+        tensor_expr,
+        calc_process
+    )
