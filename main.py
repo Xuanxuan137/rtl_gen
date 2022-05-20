@@ -213,7 +213,6 @@ if __name__ == "__main__":
         im2col_shape,
         calculation_graph
     )
-    print(second_tensor_expression)
     '''
     return {
         # 资源分配结果

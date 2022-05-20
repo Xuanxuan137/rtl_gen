@@ -1,5 +1,7 @@
 
 import math
+from multiprocessing.sharedctypes import Value
+from turtle import left
 
 import numpy as np
 import op
@@ -995,6 +997,140 @@ def plan_calc_process(
     return total_tensor_expr_with_transport_plan, C_max_usage
 
 
+def convert_instr(
+    calc_process
+):
+    '''
+    将原始的load, calc, store指令转换为
+    copy: 复制内存, 包括普通到dma_shared, 也包括dma_shared到普通
+    set_dma: 配置dma, 启动传输
+    load: dma_shared到片上
+    calc: 计算
+    store: 片上到dma_shared
+    因为load+calc和copy是可以同时进行的, 所以转换后的指令应该是两条线
+    不能同时执行的, 比如set_dma, 以及虽然可以同时执行但当前不需要并行的, 只使用左线
+    能同时执行的, 比如load+calc和copy, 分别放在左线和有线
+    那么, 转换之后的指令应为以下状态:
+    整体为一个list, 里面是多个list, 每个是一层的指令
+    每个list里包含多个tuple, 表示一组指令
+    tuple中分别为指令的左线和右线，每一线都是一个list
+    '''
+    calc_process_with_parallel = []
+    for layer_index, layer in enumerate(calc_process):
+        current_calc_process_with_parallel = []
+        load_stack = []     # 记录已经copy过的load
+        store_stack = []    # 记录还没copy过的store
+        instr_index = 0
+        while(instr_index < len(layer)):
+            process_queue = []
+            instr = layer[instr_index]
+            if("load" in instr):
+                # 如果是load，把当前及后续相连的load全部加进来
+                process_queue.append(instr)
+                instr_index += 1
+                while("load" in layer[instr_index]):
+                    process_queue.append(layer[instr_index])
+                    instr_index += 1
+                # 遍历process_queue，创建一组copy命令
+                copy_list = []
+                for load in process_queue:
+                    if(not load in load_stack):
+                        # 如果该load不在load_stack里，需要先copy
+                        target = load.split(" ")[1]
+                        copy = "copy " + target
+                        copy_list.append(copy)
+                    else:
+                        # 如果在，把它从load_stack中清除
+                        load_stack.remove(load)
+                # 将这一组copy命令加入命令列表
+                if(len(copy_list) > 0):
+                    current_calc_process_with_parallel.append(
+                        (copy_list, None))
+                    copy_list = []
+                # 处理load命令
+                current_calc_process_with_parallel.append(
+                    (["set_dma load"], None))
+                left_list = []
+                right_list = []
+                for load in process_queue:
+                    left_list.append(load)
+                # 处理load后紧随的calc命令
+                if(not "=" in layer[instr_index]):
+                    xxlog("instr after load should be calc", XXError())
+                    raise TypeError("instr after load should be calc")
+                while("=" in layer[instr_index]):
+                    left_list.append(layer[instr_index])
+                    instr_index += 1
+                # 预copy下一波load指令
+                temp_instr_index = instr_index
+                while(temp_instr_index < len(layer) and 
+                      (not "load" in layer[temp_instr_index])):
+                    temp_instr_index += 1
+                if(temp_instr_index == len(layer)):
+                    # 如果没找到下一波load
+                    right_list = None
+                else:
+                    # 如果找到了下一波load
+                    while("load" in layer[temp_instr_index]):
+                        load = layer[temp_instr_index]
+                        target = load.split(" ")[1]
+                        copy = "copy " + target
+                        right_list.append(copy)
+                        load_stack.append(load)
+                current_calc_process_with_parallel.append(
+                    (left_list, right_list))
+                left_list = []
+                right_list = []
+            elif("=" in instr):
+                # 如果是calc
+                xxlog("calc should processed in load", XXError())
+                raise TypeError("calc should processed in load")
+            elif("store" in instr):
+                # 如果是store
+                while(instr_index < len(layer) and 
+                      "store" in layer[instr_index]):
+                    process_queue.append(layer[instr_index])
+                    instr_index += 1
+                # 创建set_dma指令
+                current_calc_process_with_parallel.append(
+                    (["set_dma store"], None))
+                # 检查store_stack
+                if(len(store_stack) == 0):
+                    right_list = None
+                while(len(store_stack) > 0):
+                    store = store_stack[0]
+                    target = store.split(" ")[1]
+                    copy = "copy " + target
+                    right_list.append(copy)
+                    store_stack.remove(store)
+                # 遍历store指令
+                for store in process_queue:
+                    left_list.append(store)
+                    store_stack.append(store)
+                current_calc_process_with_parallel.append(
+                    (left_list, right_list))
+                left_list = []
+                right_list = []
+            else:
+                xxlog("Unknown instr type", XXError)
+                raise TypeError("Unknown instr type")
+        # 遍历完成后，处理load_stack和store_stack
+        if(len(load_stack) > 0):
+            xxlog("load stack should be empty", XXError())
+            raise ValueError("load stack should be empty")
+        while(len(store_stack) > 0):
+            store = store_stack[0]
+            target = store.split(" ")[1]
+            copy = "copy " + target
+            left_list.append(copy)
+            store_stack.remove(store)
+        current_calc_process_with_parallel.append((left_list, None))
+        left_list = []
+        right_list = []
+        calc_process_with_parallel.append(current_calc_process_with_parallel)
+    return calc_process_with_parallel
+
+
 def calc_cost(
     divided_border,
     submatrix_size,
@@ -1017,10 +1153,203 @@ def calc_cost(
     每个list里包含多个tuple, 表示一组指令
     tuple中分别为指令的左线和右线
     '''
+    # 设置各种开销
+    set_dma_load_cost = 6
+    set_dma_store_cost = 4
+    copy_to_cost = 0.01329345703    # 复制每个字节到dma_shared_memory的开销
+    copy_from_cost = 0.01909790039  # 从dma_shared_memory复制每个字节的开销
+    load_cost = 0.001428571429      # 传输每个字节到片上的开销
+    store_cost = 0.001428571429     # 从片上传输每个字节的开销
+    calc_cost = 0.0000390625        # 每次乘法的开销
+
     cost = 0
-    for layer_index, layer in enumerate(calc_process):
-        
-    exit()
+    calc_process_with_parallel = convert_instr(calc_process)
+    for layer_index, layer in enumerate(calc_process_with_parallel):
+        submatrix_size_A = submatrix_size[layer_index][0]
+        submatrix_size_B = submatrix_size[layer_index][1]
+        for op_block in layer:
+            # 分别计算左线和右线的开销，取较大者
+            left_line = op_block[0]
+            right_line = op_block[1]
+            left_cost = 0
+            right_cost = 0
+            # 计算左线开销
+            if(left_line != None):
+                for instr in left_line:
+                    if("set_dma" in instr):
+                        if("load" in instr):
+                            left_cost += set_dma_load_cost
+                        elif("store" in instr):
+                            left_cost += set_dma_store_cost
+                        else:
+                            xxlog("Unknown op", XXError())
+                            raise TypeError("Unknown op")
+                    elif("copy" in instr):
+                        target = instr.split(" ")[1]
+                        name = target.split("_")[0]
+                        index_row = int(target.split("_")[1])
+                        index_col = int(target.split("_")[2])
+                        if(name == "A"):
+                            shape = submatrix_size_A[index_row][index_col]
+                            space = shape[0] * shape[1]
+                            left_cost += space * copy_to_cost
+                        elif(name == "B"):
+                            shape = submatrix_size_B[index_row][index_col]
+                            space = shape[0] * shape[1]
+                            left_cost += space * copy_to_cost
+                        elif(name == "C"):
+                            shape_A = submatrix_size_A[index_row][0]
+                            shape_B = submatrix_size_B[0][index_col]
+                            shape = (shape_A[0], shape_B[1])
+                            space = shape[0] * shape[1]
+                            left_cost += space * copy_from_cost
+                        else:
+                            xxlog("Unknown target: %s"%(target), XXError())
+                            raise TypeError("Unknown target: %s"%(target))
+                    elif("load" in instr):
+                        target = instr.split(" ")[1]
+                        name = target.split("_")[0]
+                        index_row = int(target.split("_")[1])
+                        index_col = int(target.split("_")[2])
+                        if(name == "A"):
+                            shape = submatrix_size_A[index_row][index_col]
+                            space = shape[0] * shape[1]
+                            left_cost += space * load_cost
+                        elif(name == "B"):
+                            shape = submatrix_size_B[index_row][index_col]
+                            space = shape[0] * shape[1]
+                            left_cost += space * load_cost
+                        else:
+                            xxlog("Unknown load name: %s"%(name), XXError())
+                            raise TypeError("Unknown load name: %s"%(name))
+                    elif("store" in instr):
+                        target = instr.split(" ")[1]
+                        name = target.split("_")[0]
+                        index_row = int(target.split("_")[1])
+                        index_col = int(target.split("_")[2])
+                        if(name == "C"):
+                            shape_A = submatrix_size_A[index_row][0]
+                            shape_B = submatrix_size_B[0][index_col]
+                            shape = (shape_A[0], shape_B[1])
+                            space = shape[0] * shape[1]
+                            left_cost += space * store_cost
+                        else:
+                            xxlog("Unknown load name: %s"%(name), XXError())
+                            raise TypeError("Unknown load name: %s"%(name))
+                    elif("=" in instr):
+                        if("+=" in instr):
+                            result = instr.split("+=")[0]
+                            multer = instr.split("+=")[1]
+                        else:
+                            result = instr.split("=")[0]
+                            multer = instr.split("=")[1]
+                        multer_A = multer.split("*")[0]
+                        multer_B = multer.split("*")[1]
+                        name_A = multer_A.split("_")[0]
+                        index_row_A = int(multer_A.split("_")[1])
+                        index_col_A = int(multer_A.split("_")[2])
+                        name_B = multer_B.split("_")[0]
+                        index_row_B = int(multer_B.split("_")[1])
+                        index_col_B = int(multer_B.split("_")[2])
+                        shape_A = submatrix_size_A[index_row_A][index_col_A]
+                        shape_B = submatrix_size_B[index_row_B][index_col_B]
+                        left_cost += shape_A[0] * shape_A[1] * shape_B[1] * \
+                            calc_cost
+                    else:
+                        xxlog("Unknown instr: %s"%(instr), XXError())
+                        raise TypeError("Unknown instr: %s"%(instr))
+            # 计算右线开销
+            if(right_line != None):
+                for instr in right_line:
+                    if("set_dma" in instr):
+                        if("load" in instr):
+                            right_cost += set_dma_load_cost
+                        elif("store" in instr):
+                            right_cost += set_dma_store_cost
+                        else:
+                            xxlog("Unknown op", XXError())
+                            raise TypeError("Unknown op")
+                    elif("copy" in instr):
+                        target = instr.split(" ")[1]
+                        name = target.split("_")[0]
+                        index_row = int(target.split("_")[1])
+                        index_col = int(target.split("_")[2])
+                        if(name == "A"):
+                            shape = submatrix_size_A[index_row][index_col]
+                            space = shape[0] * shape[1]
+                            right_cost += space * copy_to_cost
+                        elif(name == "B"):
+                            shape = submatrix_size_B[index_row][index_col]
+                            space = shape[0] * shape[1]
+                            right_cost += space * copy_to_cost
+                        elif(name == "C"):
+                            shape_A = submatrix_size_A[index_row][0]
+                            shape_B = submatrix_size_B[0][index_col]
+                            shape = (shape_A[0], shape_B[1])
+                            space = shape[0] * shape[1]
+                            right_cost += space * copy_from_cost
+                        else:
+                            xxlog("Unknown target: %s"%(target), XXError())
+                            raise TypeError("Unknown target: %s"%(target))
+                    elif("load" in instr):
+                        target = instr.split(" ")[1]
+                        name = target.split("_")[0]
+                        index_row = int(target.split("_")[1])
+                        index_col = int(target.split("_")[2])
+                        if(name == "A"):
+                            shape = submatrix_size_A[index_row][index_col]
+                            space = shape[0] * shape[1]
+                            right_cost += space * load_cost
+                        elif(name == "B"):
+                            shape = submatrix_size_B[index_row][index_col]
+                            space = shape[0] * shape[1]
+                            right_cost += space * load_cost
+                        else:
+                            xxlog("Unknown load name: %s"%(name), XXError())
+                            raise TypeError("Unknown load name: %s"%(name))
+                    elif("store" in instr):
+                        target = instr.split(" ")[1]
+                        name = target.split("_")[0]
+                        index_row = int(target.split("_")[1])
+                        index_col = int(target.split("_")[2])
+                        if(name == "C"):
+                            shape_A = submatrix_size_A[index_row][0]
+                            shape_B = submatrix_size_B[0][index_col]
+                            shape = (shape_A[0], shape_B[1])
+                            space = shape[0] * shape[1]
+                            right_cost += space * store_cost
+                        else:
+                            xxlog("Unknown load name: %s"%(name), XXError())
+                            raise TypeError("Unknown load name: %s"%(name))
+                    elif("=" in instr):
+                        if("+=" in instr):
+                            result = instr.split("+=")[0]
+                            multer = instr.split("+=")[1]
+                        else:
+                            result = instr.split("=")[0]
+                            multer = instr.split("=")[1]
+                        multer_A = multer.split("*")[0]
+                        multer_B = multer.split("*")[1]
+                        name_A = multer_A.split("_")[0]
+                        index_row_A = int(multer_A.split("_")[1])
+                        index_col_A = int(multer_A.split("_")[2])
+                        name_B = multer_B.split("_")[0]
+                        index_row_B = int(multer_B.split("_")[1])
+                        index_col_B = int(multer_B.split("_")[2])
+                        shape_A = submatrix_size_A[index_row_A][index_col_A]
+                        shape_B = submatrix_size_B[index_row_B][index_col_B]
+                        right_cost += shape_A[0] * shape_A[1] * shape_B[1] * \
+                            calc_cost
+                    else:
+                        xxlog("Unknown instr: %s"%(instr), XXError())
+                        raise TypeError("Unknown instr: %s"%(instr))
+            # 计算cost
+            if(left_cost > right_cost):
+                cost += left_cost
+            else:
+                cost += right_cost
+    # 返回结果
+    return cost
 
 
 def analyse_resources_first_time(
@@ -2573,7 +2902,7 @@ def split_tensor_expression_second_time(
     )
 
     # 根据是否激进分配进行不同操作
-    if(False and not more_radical_allocation):
+    if(not more_radical_allocation):
         # 如果没有激进分配，直接返回结果
         return {
             # 资源分配结果
@@ -2656,3 +2985,33 @@ def split_tensor_expression_second_time(
         tensor_expr,
         calc_process
     )
+
+    # 取整数
+    conservative_cost = int(conservative_cost)
+    radical_cost = int(radical_cost)
+
+    # 选择返回结果
+    if(conservative_cost <= radical_cost):
+        # 选择保守结果
+        return {
+            # 资源分配结果
+            "resource_analyse_result": first_analyse_result,
+            # 张量表达式
+            "tensor_expr": conservative_tensor_expr,
+            # 计算流程
+            "calc_process": conservative_calc_process,
+            # C最大使用量
+            "c_max_usage": conservative_c_max_usage
+        }
+    else:
+        # 选择激进结果
+        return {
+            # 资源分配结果
+            "resource_analyse_result": second_analyse_result,
+            # 张量表达式
+            "tensor_expr": tensor_expr,
+            # 计算流程
+            "calc_process": calc_process,
+            # C最大使用量
+            "c_max_usage": c_max_usage
+        }
