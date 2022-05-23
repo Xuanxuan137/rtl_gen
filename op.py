@@ -13,11 +13,31 @@ class QInput():
         self.shape = [int(i) for i in parameters["shape"].replace("(", "")
             .replace(")", "").split(",")]
         self.dtype = parameters["dtype"]
+        self.output_shape = self.shape
     
     def __str__(self):
         string = ""
         string += "%%%d=qinput(shape=%s, dtype=%s);"%(
             self.id, self.shape, self.dtype)
+        return string
+
+
+class Input():
+    def __init__(
+        self,
+        id: int,
+        parameters: dict,
+        model_dir: str
+    ):
+        self.id = id
+        self.shape = [int(i) for i in parameters["shape"].replace("(", "")
+            .replace(")", "").split(",")]
+        self.output_shape = None
+    
+    def __str__(self):
+        string = ""
+        string += "%%%d=input(shape=%s);"%(
+            self.id, self.shape)
         return string
 
 
@@ -74,6 +94,49 @@ class QConv2d():
         return string
 
 
+class Conv2d():
+    def __init__(
+        self,
+        id: int,
+        parameters: dict,
+        model_dir: str
+    ):
+        self.id = id
+        self.input = int(parameters["input"].replace("%", ""))
+        self.output_channel = int(parameters["output_channel"])
+        self.input_channel = int(parameters["input_channel"])
+        self.kernel_size = [int(i) for i in parameters["kernel_size"]
+            .replace("(", "").replace(")", "").split(",")]
+        self.weight = np.fromfile(model_dir + parameters["weight"],
+            dtype="float32").reshape(
+            self.output_channel, self.input_channel,
+            self.kernel_size[0], self.kernel_size[1]
+        )
+        if(str(parameters["bias"]) == "None"):
+            self.bias = np.zeros((self.output_channel))
+        else:
+            self.bias = np.fromfile(model_dir + parameters["bias"],
+                dtype="float32").reshape(self.output_channel)
+        self.stride = [int(i) for i in parameters["stride"].replace("(", "")
+            .replace(")", "").split(",")]
+        self.padding = [int(i) for i in parameters["padding"].replace("(", "")
+            .replace(")", "").split(",")]
+        self.dilation = [int(i) for i in parameters["dilation"]
+            .replace("(", "").replace(")", "").split(",")]
+        self.output_shape = None
+        
+    def __str__(self):
+        string = ""
+        string += "%%%d=nn.conv2d(input=%d, output_channel=%d, " \
+            "input_channel=%d, kernel_size=%s, weight=%s, bias=%s, " \
+            "stride=%s, padding=%s, dilation=%s, output_shape=%s);"%(
+                self.id, self.input, self.output_channel, self.input_channel, 
+                self.kernel_size, self.weight.shape, self.bias.shape, 
+                self.stride, self.padding, self.dilation, self.output_shape
+            )
+        return string
+
+
 class QMaxpool2d():
     def __init__(
         self,
@@ -105,6 +168,35 @@ class QMaxpool2d():
         return string
 
 
+class Maxpool2d():
+    def __init__(
+        self,
+        id: int,
+        parameters: dict,
+        model_dir: str
+    ):
+        self.id = id
+        self.input = int(parameters["input"].replace("%", ""))
+        self.kernel_size = [int(i) for i in parameters["kernel_size"]
+            .replace("(", "").replace(")", "").split(",")]
+        self.stride = [int(i) for i in parameters["stride"].replace("(", "")
+            .replace(")", "").split(",")]
+        self.padding = [int(i) for i in parameters["padding"].replace("(", "")
+            .replace(")", "").split(",")]
+        self.dilation = [int(i) for i in parameters["dilation"]
+            .replace("(", "").replace(")", "").split(",")]
+        self.output_shape = None
+    
+    def __str__(self):
+        string = ""
+        string += "%%%d=nn.maxpool2d(input=%d, kernel_size=%s, stride=%s, " \
+            "padding=%s, dilation=%s, output_shape=%s);"%(
+                self.id, self.input, self.kernel_size, self.stride, 
+                self.padding, self.dilation, self.output_shape
+            )
+        return string
+
+
 class QRelu():
     def __init__(
         self,
@@ -128,6 +220,25 @@ class QRelu():
         return string
 
 
+class Relu():
+    def __init__(
+        self,
+        id: int,
+        parameters: dict,
+        model_dir: str
+    ):
+        self.id = id
+        self.input = int(parameters["input"].replace("%", ""))
+        self.output_shape = None
+    
+    def __str__(self):
+        string = ""
+        string += "%%%d=nn.relu(input=%d, output_shape=%s);"%(
+            self.id, self.input, self.output_shape
+        )
+        return string
+
+
 class QFlatten():
     def __init__(
         self,
@@ -143,6 +254,25 @@ class QFlatten():
     def __str__(self):
         string = ""
         string += "%%%d=nn.qflatten(input=%d, output_shape=%s);"%(
+            self.id, self.input, self.output_shape
+        )
+        return string
+
+
+class Flatten():
+    def __init__(
+        self,
+        id: int,
+        parameters: dict,
+        model_dir: str
+    ):
+        self.id = id
+        self.input = int(parameters["input"].replace("%", ""))
+        self.output_shape = None
+    
+    def __str__(self):
+        string = ""
+        string += "%%%d=nn.flatten(input=%d, output_shape=%s);"%(
             self.id, self.input, self.output_shape
         )
         return string
@@ -190,6 +320,35 @@ class QDense():
         return string
 
 
+class Dense():
+    def __init__(
+        self,
+        id: int,
+        parameters: dict,
+        model_dir: str
+    ):
+        self.id = id
+        self.input = int(parameters["input"].replace("%", ""))
+        self.output_channel = int(parameters["output_channel"])
+        self.input_channel = int(parameters["input_channel"])
+        self.weight = np.fromfile(model_dir + parameters["weight"], 
+            "float32").reshape(
+            self.output_channel, self.input_channel
+        )
+        self.bias = np.fromfile(model_dir + parameters["bias"], 
+            "float32").reshape(self.output_channel)
+        self.output_shape = None
+
+    def __str__(self):
+        string = ""
+        string += "%%%d=nn.dense(input=%d, output_channel=%d, " \
+            "input_channel=%d, weight=%s, bias=%s, output_shape=%s);"%(
+                self.id, self.input, self.output_channel, self.input_channel, 
+                self.weight.shape, self.bias.shape, self.output_shape
+            )
+        return string
+
+
 class QDropout():
     def __init__(
         self,
@@ -211,6 +370,26 @@ class QDropout():
         return string
 
 
+class Dropout():
+    def __init__(
+        self,
+        id: int,
+        parameters: dict,
+        model_dir: str
+    ):
+        self.id = id
+        self.input = int(parameters["input"].replace("%", ""))
+        self.p = float(parameters["p"])
+        self.output_shape = None
+    
+    def __str__(self):
+        string = ""
+        string += "%%%d=nn.dropout(input=%d, p=%f, output_shape=%s);"%(
+            self.id, self.input, self.p, self.output_shape
+        )
+        return string
+
+
 class QOutput():
     def __init__(
         self,
@@ -226,6 +405,25 @@ class QOutput():
     def __str__(self):
         string = ""
         string += "%%%d=qoutput(input=%d, output_shape=%s);"%(
+            self.id, self.input, self.output_shape
+        )
+        return string
+
+
+class Output():
+    def __init__(
+        self,
+        id: int,
+        parameters: dict,
+        model_dir: str
+    ):
+        self.id = id
+        self.input = int(parameters["input"].replace("%", ""))
+        self.output_shape = None
+    
+    def __str__(self):
+        string = ""
+        string += "%%%d=output(input=%d, output_shape=%s);"%(
             self.id, self.input, self.output_shape
         )
         return string
@@ -265,6 +463,26 @@ class QAdd():
         return string
 
 
+class Add():
+    def __init__(
+        self,
+        id: int,
+        parameters: dict,
+        model_dir: str
+    ):
+        self.id = id
+        self.input1 = int(parameters["input1"].replace("%", ""))
+        self.input2 = int(parameters["input2"].replace("%", ""))
+        self.output_shape = None
+    
+    def __str__(self):
+        string = ""
+        string += "%%%d=add(input1=%d, input2=%d, output_shape=%s);"%(
+                self.id, self.input1, self.input2, self.output_shape
+            )
+        return string
+
+
 class QConcat():
     def __init__(
         self,
@@ -300,6 +518,28 @@ class QConcat():
         return string
 
 
+class Concat():
+    def __init__(
+        self,
+        id: int,
+        parameters: dict,
+        model_dir: str
+    ):
+        self.id = id
+        self.input1 = int(parameters["input1"].replace("%", ""))
+        self.input2 = int(parameters["input2"].replace("%", ""))
+        self.dim = int(parameters["dim"])
+        self.output_shape = None
+    
+    def __str__(self):
+        string = ""
+        string += "%%%d=concat(input1=%d, input2=%d, dim=%d, " \
+            "output_shape=%s);"%(
+                self.id, self.input1, self.input2, self.dim, self.output_shape
+            )
+        return string
+
+
 class QAvgpool2d():
     def __init__(
         self,
@@ -313,7 +553,7 @@ class QAvgpool2d():
             .replace("(", "").replace(")", "").split(",")]
         self.stride = [int(i) for i in parameters["stride"].replace("(", "")
             .replace(")", "").split(",")]
-        self.padding = [int(i) for i in parameters["stride"].replace("(", "")
+        self.padding = [int(i) for i in parameters["padding"].replace("(", "")
             .replace(")", "").split(",")]
         self.output_shape = [int(i) for i in parameters["output_shape"]
             .replace("(", "").replace(")", "").split(",")]
@@ -325,5 +565,66 @@ class QAvgpool2d():
             "padding=%s, output_shape=%s, zero=%d);"%(
             self.id, self.input, self.kernel_size, self.stride, self.padding, 
             self.output_shape, self.zero
+        )
+        return string
+
+
+class Avgpool2d():
+    def __init__(
+        self,
+        id: int,
+        parameters: dict,
+        model_dir: str
+    ):
+        self.id = id
+        self.input = int(parameters["input"].replace("%", ""))
+        self.kernel_size = [int(i) for i in parameters["kernel_size"]
+            .replace("(", "").replace(")", "").split(",")]
+        self.stride = [int(i) for i in parameters["stride"].replace("(", "")
+            .replace(")", "").split(",")]
+        self.padding = [int(i) for i in parameters["padding"].replace("(", "")
+            .replace(")", "").split(",")]
+        self.output_shape = None
+    
+    def __str__(self):
+        string = ""
+        string += "%%%d=nn.avgpool2d(input=%d, kernel_size=%s, stride=%s, " \
+            "padding=%s, output_shape=%s);"%(
+            self.id, self.input, self.kernel_size, self.stride, self.padding,
+            self.output_shape
+        )
+        return string
+
+
+class Batch_norm2d():
+    def __init__(
+        self,
+        id: int,
+        parameters: dict,
+        model_dir: str
+    ):
+        self.id = id
+        self.input = int(parameters["input"].replace("%", ""))
+        self.num_features = int(parameters["num_features"])
+        self.weight = np.fromfile(model_dir + parameters["weight"], 
+            "float32").reshape(self.num_features)
+        self.bias = np.fromfile(model_dir + parameters["bias"],
+            "float32").reshape(self.num_features)
+        self.running_mean = np.fromfile(model_dir + parameters["running_mean"],
+            "float32").reshape(self.num_features)
+        self.running_var = np.fromfile(model_dir + parameters["running_var"],
+            "float32").reshape(self.num_features)
+        self.eps = float(parameters["eps"])
+        self.momentum = float(parameters["momentum"])
+        self.output_shape = None
+    
+    def __str__(self):
+        string = ""
+        string += "%%%d=nn.batch_norm2d(input=%d, weight=%s, bias=%s, " \
+            "running_mean=%s, running_var=%s, num_features=%d, eps=%f, " \
+            "momentum=%f, output_shape=%s);"%(
+            self.id, self.input, self.weight.shape, self.bias.shape, 
+            self.running_mean.shape, self.running_var.shape, self.num_features,
+            self.eps, self.momentum, self.output_shape
         )
         return string

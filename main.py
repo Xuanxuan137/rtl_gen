@@ -10,6 +10,7 @@ import fc
 import post_process
 import graph
 import analyser
+import code
 from util import *
 
 
@@ -20,6 +21,8 @@ if __name__ == "__main__":
 
     parser.add_argument("-m", "--model_dir", required=True, 
         help="Input model directory")
+    parser.add_argument("--float_model_dir", default=None, help="Original " \
+        "float model directory")
     parser.add_argument("-p", "--part", required=True, 
         help="Project part, e.g. xc7z020clg400-1")
     parser.add_argument("--LUT", type=int, help="The number of LUT")
@@ -44,6 +47,7 @@ if __name__ == "__main__":
 
     # 提取参数
     model_dir = args.model_dir
+    float_model_dir = args.float_model_dir
     project_part = args.part
     lut = args.LUT
     ff = args.FF
@@ -226,63 +230,97 @@ if __name__ == "__main__":
     }
     '''
 
-    exit()
-
-
-
-
-
-
-
-
-    code = conv.gen_conv(
-        MODULE_NAME="conv",
-        MUX_WIDTH=2,
-        DATA_WIDTH=8,
-        DATA_NUMBER=256,
-        OUTPUT_PORTS=[16, 32, 64, 256],
-        ZERO_X=[0, 34, 84],
-        ZERO_W=[78, 129, 132],
-        DEBUG=True,
+    # 第三次分析资源
+    third_analyse_result = analyser.analyse_resources_third_time(
+        project_part,
+        lut,
+        ff,
+        bram,
+        dsp,
+        bram_threshold,
+        lut_threshold,
+        try_increase_c_bandwidth,
+        optimize,
+        first_analyse_result,
+        first_tensor_expression,
+        second_analyse_result,
+        second_tensor_expression,
+        im2col_shape,
+        calculation_graph
     )
-    with open("output/conv.v", "w") as f:
-        f.write(code)
+    '''
+    third_analyse_result = {
+        # bram组数(组边长小于512时，此值为0)
+        "bram_group": bram_group,   
+        # 每组bram中C的列数
+        "bram_col_c_need_per_bram_group": bram_col_C_need_per_bram_group, 
+        # C需要的bram深度  
+        "depth_c_need_per_bram_col": depth_C_need_per_bram_col,     
+        # 所需要的总的bram数
+        "total_bram_need": total_bram_need,     
+        # 可用的bram数
+        "bram_avaliable": int(bram_threshold*bram),
+        # 支持的最大矩阵(也即bram组的边长)
+        "max_matrix_len_support": max_len_support,  
+        # 支持的最小矩阵
+        "min_matrix_len_support": min_len_support,  
+        # 每组bram分配的计算单元组数
+        "calc_unit_per_bram_group": calc_uint_per_bram_group,   
+        # 需要的总lut数
+        "total_lut_need": total_lut_need,           
+        # 可用的lut数
+        "lut_avaliable": int(lut_threshold*lut)
+        # 是否采用了更激进的分配
+        "more_radical_allocation": more_radical_allocation   
+    }
+    '''
 
-    code = fc.gen_fc(
-        MODULE_NAME="fc",
-        MUX_WIDTH=1,
-        DATA_WIDTH=8,
-        DATA_NUMBER=8,
-        HIDDEN_LEN=3136,
-        OUTPUT_LEN=10,
-        BIAS=[(np.random.rand(10)*100).astype("int32")],
-        COE=[0.657257],
-        RSHIFT=[9],
-        ZERO_X=[131],
-        ZERO_W=[121],
-        ZERO_Y=[106],
-        QMAX=255,
-        DEBUG=True,
+    # 第三次切分张量表达式
+    third_tensor_expression = analyser.split_tensor_expression_third_time(
+        project_part,
+        lut,
+        ff,
+        bram,
+        dsp,
+        bram_threshold,
+        lut_threshold,
+        try_increase_c_bandwidth,
+        optimize,
+        first_analyse_result,
+        first_tensor_expression,
+        second_analyse_result,
+        second_tensor_expression,
+        third_analyse_result,
+        im2col_shape,
+        calculation_graph
     )
-    with open("output/fc.v", "w") as f:
-        f.write(code)
+    '''
+    return {
+        # 资源分析结果
+        "resource_analyse_result": resource_analyse_result,
+        # im2col切分结果
+        "divided_border": divided_border,
+        # im2col切分结果中子矩阵的边长
+        "submatrix_size": submatrix_size,
+        # 张量表达式: C_0_0=A_0_0*B_0_0+A_0_1*B_1_0+...
+        "tensor_expr": tensor_expr,
+        # 计算流程: load A_0_0, load B_0_0, C_0_0=A_0_0*B_0_0
+        "calc_process": calc_process,
+        # C的最大使用量
+        "c_max_usage": c_max_usage,
+        # 并行计算流程: 含有copy, set_dma. 传输和复制部分并行
+        "calc_process_with_parallel": calc_process_with_parallel,
+        # 计算开销
+        "cost": cost
+    }
+    '''
 
-    code = post_process.post_process(
-        MODULE_NAME="post_process",
-        MUX_WIDTH=2,
-        DATA_WIDTH=32,
-        DATA_NUMBER=16,
-        OUT_DATA_WIDTH=8,
-        BIAS=[
-            np.random.randint(-32768, 32768, 16).astype("int32"),
-            np.random.randint(-32768, 32768, 32).astype("int32"),
-            np.random.randint(-32768, 32768, 64).astype("int32"),
-        ],
-        COE=[0.247298, 0.711928, 0.818192],
-        RSHIFT=[9, 9, 9],
-        ZERO_Y=[112, 108, 129],
-        QMAX=255,
-        DEBUG=True                          # debug
+
+    # 生成代码
+    code.gen_code(
+        third_tensor_expression,
+        data_on_chip,
+        calculation_graph,
+        model_dir,
+        float_model_dir
     )
-    with open("output/post_process.v", "w") as f:
-        f.write(code)

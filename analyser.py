@@ -1,7 +1,5 @@
 
 import math
-from multiprocessing.sharedctypes import Value
-from turtle import left
 
 import numpy as np
 import op
@@ -673,6 +671,7 @@ def plan_calc_process(
     B_capacity,
     C_capacity
 ):
+    xxlog("Planning calculation process...")
     # 目前当前层已经拆分为张量表达式，规划其计算流程
     # 原则上，数据量大于等于16384(128x128)的矩阵单传更划算，
     #   小于该值的合并传更划算
@@ -1077,6 +1076,7 @@ def convert_instr(
                         copy = "copy " + target
                         right_list.append(copy)
                         load_stack.append(load)
+                        temp_instr_index += 1
                 current_calc_process_with_parallel.append(
                     (left_list, right_list))
                 left_list = []
@@ -3015,3 +3015,184 @@ def split_tensor_expression_second_time(
             # C最大使用量
             "c_max_usage": c_max_usage
         }
+
+
+def analyse_resources_third_time(
+    project_part,
+    lut,
+    ff,
+    bram,
+    dsp,
+    bram_threshold,
+    lut_threshold,
+    try_increase_c_bandwidth,
+    optimize,
+    first_analyse_result,
+    first_tensor_expression,
+    second_analyse_result,
+    second_tensor_expression,
+    im2col_shape,
+    calculation_graph
+):
+    '''
+    第三次资源分配
+    '''
+    xxlog("Analysing resources third time...")
+    
+    # 读取第二次切分张量表达式结果
+    resource_analyse_result = second_tensor_expression[
+        "resource_analyse_result"]
+    tensor_expr = second_tensor_expression["tensor_expr"]
+    calc_process = second_tensor_expression["calc_process"]
+    c_max_usage = second_tensor_expression["c_max_usage"]
+    
+    # 读取资源分配结果
+    bram_group = resource_analyse_result["bram_group"]
+    bram_col_c_need_per_bram_group = resource_analyse_result[
+        "bram_col_c_need_per_bram_group"]
+    depth_c_need_per_bram_col = resource_analyse_result[
+        "depth_c_need_per_bram_col"]
+    total_bram_need = resource_analyse_result["total_bram_need"]
+    bram_avaliable = resource_analyse_result["bram_avaliable"]
+    max_len_support = resource_analyse_result["max_matrix_len_support"]
+    bram_A_need = max_len_support // 8 if(bram_group == 0) else \
+        (max_len_support // 8) * (max_len_support // 512) * bram_group
+    bram_B_need = max_len_support // 8 if(bram_group == 0) else \
+        (max_len_support // 8) * (max_len_support // 512) * bram_group
+
+
+    # 尝试增加C的带宽
+    if(try_increase_c_bandwidth):
+        temp_bram_col_c_need_per_bram_group = bram_col_c_need_per_bram_group
+        temp_depth_c_need_per_bram_col = depth_c_need_per_bram_col
+        bram_c_need_per_col = get_bram_usage(
+            64, temp_depth_c_need_per_bram_col)
+        bram36_c_need_per_col = bram_c_need_per_col[0]
+        bram18_c_need_per_col = bram_c_need_per_col[1]
+        bram_c_need_per_group = bram36_c_need_per_col * \
+            temp_bram_col_c_need_per_bram_group + math.ceil(
+            bram18_c_need_per_col * temp_bram_col_c_need_per_bram_group / 2)
+        bram_C_need = bram_c_need_per_group if(bram_group == 0) else \
+            bram_c_need_per_group * bram_group
+        temp_total_bram_need = bram_A_need + bram_B_need + bram_C_need
+        # 尝试翻倍C的带宽，同时减半C的深度，直到bram不够
+        while(temp_total_bram_need < bram_avaliable):
+            temp_bram_col_c_need_per_bram_group *= 2
+            temp_depth_c_need_per_bram_col //= 2
+            bram_c_need_per_col = get_bram_usage(
+                64, temp_depth_c_need_per_bram_col)
+            bram36_c_need_per_col = bram_c_need_per_col[0]
+            bram18_c_need_per_col = bram_c_need_per_col[1]
+            bram_c_need_per_group = bram36_c_need_per_col * \
+                temp_bram_col_c_need_per_bram_group + math.ceil(
+                bram18_c_need_per_col * 
+                temp_bram_col_c_need_per_bram_group / 2)
+            bram_C_need = bram_c_need_per_group if(bram_group == 0) else \
+                bram_c_need_per_group * bram_group
+            temp_total_bram_need = bram_A_need + bram_B_need + bram_C_need
+        # 此时bram使用量已经超过，回退一步
+        temp_bram_col_c_need_per_bram_group //= 2
+        temp_depth_c_need_per_bram_col *= 2
+        bram_col_c_need_per_bram_group = temp_bram_col_c_need_per_bram_group
+        depth_c_need_per_bram_col = temp_depth_c_need_per_bram_col
+    
+    # 返回结果
+    third_analyse_result = resource_analyse_result.copy()
+    third_analyse_result["bram_col_c_need_per_bram_group"] = \
+        bram_col_c_need_per_bram_group
+    third_analyse_result["depth_c_need_per_bram_col"] = \
+        depth_c_need_per_bram_col
+    
+    return third_analyse_result
+
+
+def split_tensor_expression_third_time(
+    project_part,
+    lut,
+    ff,
+    bram,
+    dsp,
+    bram_threshold,
+    lut_threshold,
+    try_increase_c_bandwidth,
+    optimize,
+    first_analyse_result,
+    first_tensor_expression,
+    second_analyse_result,
+    second_tensor_expression,
+    third_analyse_result,
+    im2col_shape,
+    calculation_graph
+):
+    '''
+    第三次切分张量表达式
+    '''
+    
+    # 读取参数
+    bram_group = third_analyse_result["bram_group"]
+    max_len_support = third_analyse_result["max_matrix_len_support"]
+    min_len_support = third_analyse_result["min_matrix_len_support"]
+    bram_col_C_need_per_bram_group = third_analyse_result[
+        "bram_col_c_need_per_bram_group"]
+    depth_c_need_per_bram_col = third_analyse_result["depth_c_need_per_bram_col"]
+    depth_per_bram = 512
+    A_capacity = max_len_support*depth_per_bram if(max_len_support < 512) \
+        else (max_len_support*max_len_support*bram_group)
+    B_capacity = max_len_support*depth_per_bram if(max_len_support < 512) \
+        else (max_len_support*max_len_support*bram_group)
+    C_capacity = bram_col_C_need_per_bram_group * \
+        depth_c_need_per_bram_col * 8 if(bram_group == 0) else \
+        bram_col_C_need_per_bram_group * depth_c_need_per_bram_col * \
+        bram_group * 8
+
+    # 切分im2col矩阵
+    divided_border = cut_im2col_matrix(
+        im2col_shape,
+        calculation_graph,
+        max_len_support,
+        min_len_support
+    )
+    
+    # 校验切分结果
+    check_divide_result(divided_border)
+
+    # 计算切分后的子矩阵边长
+    submatrix_size = get_submatrix_size(divided_border)
+
+    # 拆分张量表达式
+    tensor_expr = split_tensor_expression(submatrix_size)
+    
+    # 规划计算流程
+    calc_process, c_max_usage = plan_calc_process(
+        submatrix_size,
+        tensor_expr,
+        im2col_shape,
+        A_capacity,
+        B_capacity,
+        C_capacity
+    )
+
+    # 转换计算流程
+    calc_process_with_parallel = convert_instr(calc_process)
+
+    # 计算开销
+    cost = calc_cost(
+        divided_border,
+        submatrix_size,
+        tensor_expr,
+        calc_process
+    )
+
+    # 返回结果
+    third_tensor_expression = {}
+    third_tensor_expression["resource_analyse_result"] = third_analyse_result
+    third_tensor_expression["divided_border"] = divided_border
+    third_tensor_expression["submatrix_size"] = submatrix_size
+    third_tensor_expression["tensor_expr"] = tensor_expr
+    third_tensor_expression["calc_process"] = calc_process
+    third_tensor_expression["c_max_usage"] = c_max_usage
+    third_tensor_expression["calc_process_with_parallel"] = \
+        calc_process_with_parallel
+    third_tensor_expression["cost"] = cost
+
+    return third_tensor_expression
