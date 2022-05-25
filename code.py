@@ -10,6 +10,7 @@ def gen_code(
     analyse_result,
     data_on_chip,
     calculation_graph,
+    im2col_shape,
     model_dir,
     float_mdoel_dir
 ):
@@ -28,6 +29,7 @@ def gen_code(
 
     # # 生成cpu浮点计算代码
     cpu_float.gen_code(
+        im2col_shape,
         divided_border,
         submatrix_size,
         calc_process,

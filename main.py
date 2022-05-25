@@ -321,6 +321,7 @@ if __name__ == "__main__":
         third_tensor_expression,
         data_on_chip,
         calculation_graph,
+        im2col_shape,
         model_dir,
         float_model_dir
     )
