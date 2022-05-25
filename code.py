@@ -1,6 +1,7 @@
 
 
 import cpu_float
+import cpu_int
 import conv
 import fc
 import post_process
@@ -37,6 +38,13 @@ def gen_code(
     )
 
     # 生成cpu整数计算代码
+    cpu_int.gen_code(
+        im2col_shape,
+        divided_border,
+        submatrix_size,
+        calc_process,
+        model_dir
+    )
     
     # 生成conv
 
