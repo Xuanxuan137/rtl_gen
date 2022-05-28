@@ -63,9 +63,6 @@ void im2col(float * data_col, float * data_im, int height, int width, int channe
             int height_col, int width_col, int kernel_h, int kernel_w, int stride_h, int stride_w, 
             int pad_h, int pad_w, int dilation_h, int dilation_w)
 {
-    #ifdef _OPENMP
-    #pragma omp parallel for
-    #endif
     for (int c = 0; c < channels_col; ++c) {
         int w_offset = c % kernel_w;
         int h_offset = (c / kernel_w) % kernel_h;
@@ -649,7 +646,7 @@ def gen_blas_deploy(
     code += """
 cmake_minimum_required(VERSION 3.5)
 project(blas_deploy)
-set(CMAKE_C_FLAGS "-O3 -Wall -W -pthread")
+set(CMAKE_C_FLAGS "-O3 -Wall -W -pthread -fopenmp")
 set(CMAKE_BUILD_TYPE "Release")
 include_directories(
     /opt/OpenBLAS/include
@@ -1306,7 +1303,7 @@ def gen_block_deploy(
     code += """
 cmake_minimum_required(VERSION 3.5)
 project(blas_block_deploy)
-set(CMAKE_C_FLAGS "-O3 -Wall -W -pthread")
+set(CMAKE_C_FLAGS "-O3 -Wall -W -pthread -fopenmp")
 set(CMAKE_BUILD_TYPE "Release")
 include_directories(
     /opt/OpenBLAS/include

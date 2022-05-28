@@ -40,6 +40,7 @@ def gen_code(
     # 生成cpu整数计算代码
     cpu_int.gen_code(
         im2col_shape,
+        calculation_graph,
         divided_border,
         submatrix_size,
         calc_process,
