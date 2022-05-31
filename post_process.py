@@ -31,7 +31,7 @@ def decimal_to_binary(decimal_number, width):
     return bin
 
 
-def post_process(
+def gen_post_process(
     MODULE_NAME: str,                   # 模块名
     MUX_WIDTH: int,                     # mux位宽
     DATA_WIDTH: int,                    # 输入位宽(must be 32)
@@ -68,7 +68,7 @@ def post_process(
     channel_width = int(math.ceil(channel_width/8))*8
     code += indent + "input [%d:0] channel,\n"%(channel_width-1)
     code += indent + "input [%d:0] mux,\n"%(MUX_WIDTH-1)
-    code += indent + "input do_relu,\n"
+    code += indent + "input [3:0] activation,\n"
     code += indent + "output [%d:0] out_contiguous,\n"%(
         OUT_DATA_WIDTH*DATA_NUMBER-1)
     code = code[:-2] + "\n"
@@ -224,19 +224,19 @@ def post_process(
     for i in range(DATA_NUMBER):
         code += indent + "t_add[%d] <= t[%d] + zero_y;\n"%(i, i)
     #   # relu
-    code += indent + "if(do_relu) begin\n"
+    code += indent + "if(activation == 0) begin\n"
     indent = "\t\t\t"
     for i in range(DATA_NUMBER):
-        code += indent + "relu[%d] <= (t_add[%d] < zero_y) ? zero_y : \n"%(
-            i, i)
+        code += indent + "relu[%d] <= (t_add[%d] < 0) ? 0 : \n"%(i, i)
         code += indent + "            (t_add[%d] > qmax) ? qmax : \n"%(i)
         code += indent + "            t_add[%d];\n"%(i)
     indent = "\t\t"
     code += indent + "end\n"
-    code += indent + "else begin\n"
+    code += indent + "else if(activation == 1) begin\n"
     indent = "\t\t\t"
     for i in range(DATA_NUMBER):
-        code += indent + "relu[%d] <= (t_add[%d] < 0) ? 0 : \n"%(i, i)
+        code += indent + "relu[%d] <= (t_add[%d] < zero_y) ? zero_y : \n"%(
+            i, i)
         code += indent + "            (t_add[%d] > qmax) ? qmax : \n"%(i)
         code += indent + "            t_add[%d];\n"%(i)
     indent = "\t\t"

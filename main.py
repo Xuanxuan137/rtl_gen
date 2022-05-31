@@ -315,7 +315,6 @@ if __name__ == "__main__":
     }
     '''
 
-
     # 生成代码
     code.gen_code(
         third_tensor_expression,

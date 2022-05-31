@@ -89,7 +89,7 @@ def get_bram_depth(width, usage):
     '''
     根据bram位宽和用量获取可用bram深度
     由于不知道xilinx是怎么计算bram用量的, 这一步目前只能查表
-    这个不太靠谱，勉强用吧
+    这个不太靠谱, 勉强用吧
     '''
     if(width == 64):
         depth = {
@@ -183,7 +183,7 @@ def set_resources(
     dsp
 ):
     '''
-    对于未给定的资源数量，根据芯片型号自动设置资源数量
+    对于未给定的资源数量, 根据芯片型号自动设置资源数量
     '''
     xxlog("Setting resources...")
     if(lut is not None and
@@ -202,7 +202,7 @@ def set_resources(
         known_bram = 140
         known_dsp = 220
     
-    # 如果某个资源没有给出，将其设为预知资源数量
+    # 如果某个资源没有给出, 将其设为预知资源数量
     if(lut is None):
         lut = known_lut
     if(ff is None):
@@ -330,9 +330,9 @@ def cut_im2col_matrix(
     for shape in im2col_shape:
         original_shape.append(([shape[0][0], shape[0][1]], 
             [shape[1][0], shape[1][1]]))
-    # 切分结果。它是一个list。里面的每个元素是一个tuple，表示一层的切分结果。
-    # tuple里有两个元素，分别为A和B的切分结果，它们都是list
-    # 这两个list中每个包含n个list。每个list包含4个元素，分别为切块在
+    # 切分结果。它是一个list。里面的每个元素是一个tuple, 表示一层的切分结果。
+    # tuple里有两个元素, 分别为A和B的切分结果, 它们都是list
+    # 这两个list中每个包含n个list。每个list包含4个元素, 分别为切块在
     # 纵向和横向上的起止点
     divided_border = []     # 切分结果
     xxlog("Divide im2col matrix...")
@@ -350,7 +350,7 @@ def cut_im2col_matrix(
         start_w_B = 0
         current_layer_divided_border_A = []
         current_layer_divided_border_B = []
-        # A和b是分别切分的。除了相乘边需要保持一致外，其他边不需要一致。
+        # A和b是分别切分的。除了相乘边需要保持一致外, 其他边不需要一致。
         # 先切分A
         while(True):
             if(height_A - start_h_A >= max_len_support and
@@ -395,9 +395,9 @@ def cut_im2col_matrix(
                 current_layer_divided_border_A[-1][3]))
             # 修改下一次切分起始点
             if(start_w_A + cut_width >= width_A):
-                # width方向达到最大值，需要换行
+                # width方向达到最大值, 需要换行
                 if(start_h_A + cut_height >= height_A):
-                    # 如果height方向也达到最大值，结束
+                    # 如果height方向也达到最大值, 结束
                     break
                 else:
                     start_h_A += cut_height
@@ -448,9 +448,9 @@ def cut_im2col_matrix(
                 current_layer_divided_border_B[-1][3]))
             # 修改下一次切分起始点
             if(start_w_B + cut_width >= width_B):
-                # width方向达到最大值，需要换行
+                # width方向达到最大值, 需要换行
                 if(start_h_B + cut_height >= height_B):
-                    # 如果height方向也达到最大值，结束
+                    # 如果height方向也达到最大值, 结束
                     break
                 else:
                     start_h_B += cut_height
@@ -573,11 +573,11 @@ def get_submatrix_size(divided_border):
     '''
     从divided_border(im2col矩阵切块后的结果)中寻找子矩阵的边长
     '''
-    # 子矩阵的边长。它是一个list。里面的每个元素是一个tuple，表示一层的子矩阵边长
-    # tuple里包含两个元素，它们都是list，分别表示A和B的子矩阵边长
-    # 这两个list中每个包含多个list，表示A或B一行子矩阵的边长
-    # 每个list中包含多个tuple，表示该行每个子矩阵的边长
-    # tuple中有两个元素，分别为height和width
+    # 子矩阵的边长。它是一个list。里面的每个元素是一个tuple, 表示一层的子矩阵边长
+    # tuple里包含两个元素, 它们都是list, 分别表示A和B的子矩阵边长
+    # 这两个list中每个包含多个list, 表示A或B一行子矩阵的边长
+    # 每个list中包含多个tuple, 表示该行每个子矩阵的边长
+    # tuple中有两个元素, 分别为height和width
     xxlog("Assigning index to divided submatrix...")
     submatrix_size = []
     for n, layer in enumerate(divided_border):
@@ -597,12 +597,12 @@ def get_submatrix_size(divided_border):
                 # 如果到新的一行
                 last_start_h = start_h
                 if(start_h != 0):
-                    # 如果不是第一行，把上一行的结果加入进去
+                    # 如果不是第一行, 把上一行的结果加入进去
                     submatrix_size_A.append(submatrix_size_A_current_len)
                 # 清空上一行结果
                 submatrix_size_A_current_len = []
             submatrix_size_A_current_len.append((height, width))
-        # 最后，把最后一行加入进去
+        # 最后, 把最后一行加入进去
         submatrix_size_A.append(submatrix_size_A_current_len)
 
         # 遍历B
@@ -616,15 +616,15 @@ def get_submatrix_size(divided_border):
                 # 如果到新的一行
                 last_start_h = start_h
                 if(start_h != 0):
-                    # 如果不是第一行，把上一行的结果加进去
+                    # 如果不是第一行, 把上一行的结果加进去
                     submatrix_size_B.append(submatrix_size_B_current_len)
                 # 清空上一行结果
                 submatrix_size_B_current_len = []
             submatrix_size_B_current_len.append((height, width))
-        # 最后，把最后一行加入进去
+        # 最后, 把最后一行加入进去
         submatrix_size_B.append(submatrix_size_B_current_len)
 
-        # 遍历完成后，将当前层结果加入最终结果
+        # 遍历完成后, 将当前层结果加入最终结果
         submatrix_size.append((submatrix_size_A, submatrix_size_B))
 
         xxlog("Current layer size(regard a submatrix block as an element): "\
@@ -672,16 +672,16 @@ def plan_calc_process(
     C_capacity
 ):
     xxlog("Planning calculation process...")
-    # 目前当前层已经拆分为张量表达式，规划其计算流程
-    # 原则上，数据量大于等于16384(128x128)的矩阵单传更划算，
+    # 目前当前层已经拆分为张量表达式, 规划其计算流程
+    # 原则上, 数据量大于等于16384(128x128)的矩阵单传更划算, 
     #   小于该值的合并传更划算
     # 那么考虑以下四种情况
-    # 1. 连续的小矩阵，攒到16384或填满ABC中的一个停止
+    # 1. 连续的小矩阵, 攒到16384或填满ABC中的一个停止
     # 2. 连续的大矩阵。单独传输
-    # 3. 连续的小矩阵后是大矩阵。若小矩阵不够16384且空间足够，尝试将大矩阵加入进去
-    # 4. 大矩阵后是连续的小矩阵。如果小矩阵数量少且大矩阵未达最大限制，尝试加入进去
-    # 在规划过程中，一定不跨层规划。对于跨C块规划问题：如果当前容量能够将下一个C块
-    # 完整地容纳进来，则容纳，否则不跨C块。
+    # 3. 连续的小矩阵后是大矩阵。若小矩阵不够16384且空间足够, 尝试将大矩阵加入进去
+    # 4. 大矩阵后是连续的小矩阵。如果小矩阵数量少且大矩阵未达最大限制, 尝试加入进去
+    # 在规划过程中, 一定不跨层规划。对于跨C块规划问题：如果当前容量能够将下一个C块
+    # 完整地容纳进来, 则容纳, 否则不跨C块。
 
 
     # 最终结果
@@ -717,7 +717,7 @@ def plan_calc_process(
         C_in_plan = []
         # 计算规划
         calc_in_plan = []
-        # 当前传输规划中，ABC已经累积的空间
+        # 当前传输规划中, ABC已经累积的空间
         A_accumulate_space = 0
         B_accumulate_space = 0
         C_accumulate_space = 0
@@ -759,7 +759,7 @@ def plan_calc_process(
             return False
         
         def clear_plan():
-            # 清空计划表，并统计C的峰值占用(不清空C)
+            # 清空计划表, 并统计C的峰值占用(不清空C)
             nonlocal A_in_plan, B_in_plan, C_in_plan, calc_in_plan
             nonlocal A_accumulate_space, B_accumulate_space, C_accumulate_space
             nonlocal tensor_expr_with_transport_plan
@@ -789,11 +789,11 @@ def plan_calc_process(
                 tensor_expr_with_transport_plan))
 
         def check_can_hold_next_C_block_all(C_block_index):
-            # 检查在当前情况的基础上，是否能把计算下一个C块(先检查是否还有下一个C块)
-            # 需要的内容全部存进来，且要求计算下一个C块中不含大矩阵，且B的占用不超65536
+            # 检查在当前情况的基础上, 是否能把计算下一个C块(先检查是否还有下一个C块)
+            # 需要的内容全部存进来, 且要求计算下一个C块中不含大矩阵, 且B的占用不超65536
             find_index = C_block_index + 1
             if(find_index >= len(tensor_expr)):
-                # 没有下一个C块了，要求清空plan
+                # 没有下一个C块了, 要求清空plan
                 return False
             temp_tensor_expr = tensor_expr[find_index]
             block_C = temp_tensor_expr.split("=")[0]
@@ -809,7 +809,7 @@ def plan_calc_process(
                 multer_A, multer_B, index_A, index_B, size_A, size_B, size_C, \
                 space_A, space_B, space_C = split_adder(adder)
                 if(is_large_matrix(space_B)):
-                    # 如果含大矩阵，要求清空plan
+                    # 如果含大矩阵, 要求清空plan
                     return False
                 if(multer_A not in A_in_plan_copy):
                     A_in_plan_copy.append(multer_A)
@@ -871,7 +871,7 @@ def plan_calc_process(
                         C_in_plan, calc_in_plan))
             
             def check_can_hold_all(adder_index):
-                # 检查下一个大矩阵或当前C块结束前的所有小矩阵是否能够全部装下，
+                # 检查下一个大矩阵或当前C块结束前的所有小矩阵是否能够全部装下, 
                 # 且不超65536
                 A_in_plan_copy = [i for i in A_in_plan]
                 B_in_plan_copy = [i for i in B_in_plan]
@@ -925,7 +925,7 @@ def plan_calc_process(
                             clear_plan()
                             # 下一步交给计划表空的情况处理
                     if(len(A_in_plan) == 0 and len(B_in_plan) == 0):
-                        # 如果计划表空(为了接住上面一行的结果，这里不用else)
+                        # 如果计划表空(为了接住上面一行的结果, 这里不用else)
                         add_to_plan(multer_A, multer_B, block_C, size_A,
                             size_B, size_C, space_A, space_B, space_C)
                         if(adder_index+1 < len(adders)):
@@ -1012,7 +1012,7 @@ def convert_instr(
     那么, 转换之后的指令应为以下状态:
     整体为一个list, 里面是多个list, 每个是一层的指令
     每个list里包含多个tuple, 表示一组指令
-    tuple中分别为指令的左线和右线，每一线都是一个list
+    tuple中分别为指令的左线和右线, 每一线都是一个list
     '''
     calc_process_with_parallel = []
     for layer_index, layer in enumerate(calc_process):
@@ -1024,22 +1024,22 @@ def convert_instr(
             process_queue = []
             instr = layer[instr_index]
             if("load" in instr):
-                # 如果是load，把当前及后续相连的load全部加进来
+                # 如果是load, 把当前及后续相连的load全部加进来
                 process_queue.append(instr)
                 instr_index += 1
                 while("load" in layer[instr_index]):
                     process_queue.append(layer[instr_index])
                     instr_index += 1
-                # 遍历process_queue，创建一组copy命令
+                # 遍历process_queue, 创建一组copy命令
                 copy_list = []
                 for load in process_queue:
                     if(not load in load_stack):
-                        # 如果该load不在load_stack里，需要先copy
+                        # 如果该load不在load_stack里, 需要先copy
                         target = load.split(" ")[1]
                         copy = "copy " + target
                         copy_list.append(copy)
                     else:
-                        # 如果在，把它从load_stack中清除
+                        # 如果在, 把它从load_stack中清除
                         load_stack.remove(load)
                 # 将这一组copy命令加入命令列表
                 if(len(copy_list) > 0):
@@ -1114,7 +1114,7 @@ def convert_instr(
             else:
                 xxlog("Unknown instr type", XXError)
                 raise TypeError("Unknown instr type")
-        # 遍历完成后，处理load_stack和store_stack
+        # 遍历完成后, 处理load_stack和store_stack
         if(len(load_stack) > 0):
             xxlog("load stack should be empty", XXError())
             raise ValueError("load stack should be empty")
@@ -1168,7 +1168,7 @@ def calc_cost(
         submatrix_size_A = submatrix_size[layer_index][0]
         submatrix_size_B = submatrix_size[layer_index][1]
         for op_block in layer:
-            # 分别计算左线和右线的开销，取较大者
+            # 分别计算左线和右线的开销, 取较大者
             left_line = op_block[0]
             right_line = op_block[1]
             left_cost = 0
@@ -1369,17 +1369,17 @@ def analyse_resources_first_time(
     第一次分析资源
     0. 保证bram带宽为2的幂
     1. 按照A:B:C=1:1:4分配bram
-    2. 由于bram深度为512，所以如果A和B的深度超过了512，就浪费了带宽，所以初始时
-    限制A和B的最大深度为512，即单组bram最大支持512x512的矩阵乘法。
-    3. 对于bram只能容纳小于等于一组的，直接计算即可
-    4. 对于bram能够容纳大于等于1组的，只要完整组。
+    2. 由于bram深度为512, 所以如果A和B的深度超过了512, 就浪费了带宽, 所以初始时
+    限制A和B的最大深度为512, 即单组bram最大支持512x512的矩阵乘法。
+    3. 对于bram只能容纳小于等于一组的, 直接计算即可
+    4. 对于bram能够容纳大于等于1组的, 只要完整组。
     5. 保证组的数量为2的幂
-    6. 对于bram能够容纳大于1组的，如果资源足够使组的边长和深度均翻倍，则增加单个组
-    的大小。即如果能够容纳4个512组，则使组大小变为1024。
-    如果不足以使组大小增加，则将这两组横向排列以增加带宽。
-    显然，这时可以发现，组的数量只能为1和2，当达到4的时候，组就可以合并，变成更大的单个组。
-    7. 计算给当前每组bram分配一组计算单元时，lut的使用量。
-    8. 如果lut充足，尝试给每组bram分配的计算单元翻倍。
+    6. 对于bram能够容纳大于1组的, 如果资源足够使组的边长和深度均翻倍, 则增加单个组
+    的大小。即如果能够容纳4个512组, 则使组大小变为1024。
+    如果不足以使组大小增加, 则将这两组横向排列以增加带宽。
+    显然, 这时可以发现, 组的数量只能为1和2, 当达到4的时候, 组就可以合并, 变成更大的单个组。
+    7. 计算给当前每组bram分配一组计算单元时, lut的使用量。
+    8. 如果lut充足, 尝试给每组bram分配的计算单元翻倍。
     9. 保证每组bram分配的计算单元组数为2的幂
     '''
     xxlog("Analyse resources first time")
@@ -1390,10 +1390,10 @@ def analyse_resources_first_time(
     depth_per_bram = 512        # 一块bram的深度
     bytes_per_bram_line = 8     # bram一行的字节数
     
-    matrix_len = 8  # 支持的最大矩阵边长。不能小于8，因为一块bram就能支持8
+    matrix_len = 8  # 支持的最大矩阵边长。不能小于8, 因为一块bram就能支持8
     bram_group = 0  # 完整的512 bram组数
     while(True):
-        # 计算当前matrix_len需要的空间，仅在512以下查找
+        # 计算当前matrix_len需要的空间, 仅在512以下查找
         space_A_need = matrix_len * matrix_len
         space_B_need = matrix_len * matrix_len
         bram_A_need = matrix_len // bytes_per_bram_line
@@ -1409,7 +1409,7 @@ def analyse_resources_first_time(
                 int(bram_threshold*bram)
             ))
             if(matrix_len == max_len_per_group):
-                # 如果一组bram满512了，此时应该新开一组bram
+                # 如果一组bram满512了, 此时应该新开一组bram
                 bram_group += 1
                 matrix_len = 0
                 xxlog("Complete group number: %d."%(bram_group))
@@ -1417,7 +1417,7 @@ def analyse_resources_first_time(
             else:
                 matrix_len *= 2
         else:
-            # 此时bram已经用超了，应该回退一步
+            # 此时bram已经用超了, 应该回退一步
             if(matrix_len == 8):
                 xxlog("Device is too small to accelerate neural network", 
                     XXError())
@@ -1436,7 +1436,7 @@ def analyse_resources_first_time(
     incomplete_bram_group_len = matrix_len
 
     if(bram_group >= 1):
-        # 说明有完整的组，此时应该尝试给组翻倍
+        # 说明有完整的组, 此时应该尝试给组翻倍
         xxlog("Found a complete group in first analyse: Bram usage: %d, " \
             "bram avaliable: %d. Try to double the bram"%(total_bram_need,
             int(bram_threshold*bram)))
@@ -1456,13 +1456,13 @@ def analyse_resources_first_time(
                     int(bram_threshold*bram)))
                 break
     else:
-        # 没有完整的组，分配结束
+        # 没有完整的组, 分配结束
         xxlog("First analyse result: No complete group. Matrix_len: %d, " \
             "bram usage: %d, bram avaliable: %d"%(incomplete_bram_group_len, 
             total_bram_need, int(bram_threshold*bram)))
     
     '''
-    对完整的bram组进行4合1，并对应增大片上支持的最大矩阵边长，并计算支持的最小矩阵边长
+    对完整的bram组进行4合1, 并对应增大片上支持的最大矩阵边长, 并计算支持的最小矩阵边长
     '''
     # 片上支持的最大矩阵
     max_len_support = max_len_per_group if(bram_group >= 1) \
@@ -1470,7 +1470,7 @@ def analyse_resources_first_time(
     if(bram_group >= 4):
         xxlog("Try to merge 4 complete group into 1...")
         while(bram_group >= 4):
-            # bram_group每4倍，最大矩阵边长2倍
+            # bram_group每4倍, 最大矩阵边长2倍
             bram_group //= 4
             max_len_support *= 2
         xxlog("Merge result: Group: %d. Max len support: %d"%(
@@ -1501,7 +1501,7 @@ def analyse_resources_first_time(
     
     calc_unit_per_bram_group = 1
     if(total_lut_need - lut_counter_per_dsp*dsp <= int(lut_threshold*lut)):
-        # 如果资源充足，增加每个bram组的计算单元数量
+        # 如果资源充足, 增加每个bram组的计算单元数量
         xxlog("Try to double calculation unit")
         while(True):
             total_lut_need *= 2
@@ -1523,18 +1523,18 @@ def analyse_resources_first_time(
                         int(lut_threshold*lut)))
                 break
     else:
-        # 如果资源不够，进行缩减bram数量
+        # 如果资源不够, 进行缩减bram数量
         xxlog("Lut not enough, try to decrease...")
         solved = False
         # 尝试减少完整的bram组
         while(max_len_support > 512 or bram_group > 1):
             if(bram_group == 1):
-                # 如果此时是一个大bram组，则拆成4个小的，然后减半
+                # 如果此时是一个大bram组, 则拆成4个小的, 然后减半
                 max_len_support //= 2
                 total_lut_need //= 2
                 bram_group = 2
             elif(bram_group == 2):
-                # 如果此时是2个bram组，则减半。max_len_support不需要变
+                # 如果此时是2个bram组, 则减半。max_len_support不需要变
                 bram_group //= 2
                 total_lut_need //= 2
             else:
@@ -1548,7 +1548,7 @@ def analyse_resources_first_time(
                 xxlog("Lut enough now, need:%d, avaliable:%d"%(
                     total_lut_need, int(lut_threshold*lut)))
                 break
-        # 如果bram组不多余1组，尝试缩减最大矩阵边长
+        # 如果bram组不多余1组, 尝试缩减最大矩阵边长
         if(not solved):
             while(max_len_support >= 8):
                 max_len_support //= 2
@@ -1560,13 +1560,13 @@ def analyse_resources_first_time(
                     xxlog("Lut enough now, need:%d, avaliable:%d"%(
                         total_lut_need, int(lut_threshold*lut)))
                     break
-        # 如果矩阵边长小于8，lut仍不够，报错
+        # 如果矩阵边长小于8, lut仍不够, 报错
         if(not solved):
             xxlog("Device is too small to accelerate neural network", 
                 XXError())
             raise ValueError("Device is too small to accelerate " \
                 "neural network")
-        # 解决后，重新计算bram需求
+        # 解决后, 重新计算bram需求
         bram_A_need = max_len_support // bytes_per_bram_line
         bram_B_need = max_len_support // bytes_per_bram_line
         space_C_need = max_len_support * max_len_support * 4
@@ -1598,17 +1598,17 @@ def analyse_resources_first_time(
     修正C占用空间
     -- 拆分张量表达式
     对矩阵进行切块
-    1. 尽量切大块，但不超过片上支持的最大边长
+    1. 尽量切大块, 但不超过片上支持的最大边长
     2. 最小边长不能小于片上支持的最小边长
     3. 矩阵的相乘边要为2的幂
-    4. 矩阵的结果边要为合适的长度，使得本矩阵块能够填满bram的一行
-        (由于前面三条的限制，本条一定能满足)
+    4. 矩阵的结果边要为合适的长度, 使得本矩阵块能够填满bram的一行
+        (由于前面三条的限制, 本条一定能满足)
     得到切块结果
     '''
     while(True):
-        # 切分结果。它是一个list。里面的每个元素是一个tuple，表示一层的切分结果。
-        # tuple里有两个元素，分别为A和B的切分结果，它们都是list
-        # 这两个list中每个包含n个list。每个list包含4个元素，分别为切块在
+        # 切分结果。它是一个list。里面的每个元素是一个tuple, 表示一层的切分结果。
+        # tuple里有两个元素, 分别为A和B的切分结果, 它们都是list
+        # 这两个list中每个包含n个list。每个list包含4个元素, 分别为切块在
         # 纵向和横向上的起止点
         divided_border = cut_im2col_matrix(
             im2col_shape,
@@ -1620,8 +1620,8 @@ def analyse_resources_first_time(
         '''
         校验切分结果：
         1. A的上边应该与B的左边切分结果相同
-        2. A的不同行的上边切分结果应相同(不校验了，懒)
-        3. B的不同列的左边的切分结果应相同(不校验了，懒)
+        2. A的不同行的上边切分结果应相同(不校验了, 懒)
+        3. B的不同列的左边的切分结果应相同(不校验了, 懒)
         '''
         xxlog("Checking divided result...")
         for layer in divided_border:
@@ -1632,7 +1632,7 @@ def analyse_resources_first_time(
             last_start_h_B = -1
             for border in border_A:
                 if(border[0] == 0):
-                    # 遍历第一行，记录每一块的width
+                    # 遍历第一行, 记录每一块的width
                     cut_result_A.append(border[3] - border[2])
             for border in border_B:
                 if(border[0] != last_start_h_B):
@@ -1647,11 +1647,11 @@ def analyse_resources_first_time(
         '''
         修正C占用空间
         -- 重新计算C需要的空间
-        1. 越小的矩阵块在计算时，每周期得到的结果数越多，这决定了C需要的带宽。
-        2. C所需要的bram数需要在1的基础上，再乘上每块里bram分配的计算单元组数。
+        1. 越小的矩阵块在计算时, 每周期得到的结果数越多, 这决定了C需要的带宽。
+        2. C所需要的bram数需要在1的基础上, 再乘上每块里bram分配的计算单元组数。
         3. 根据C需要的带宽计算C实际需要的bram数
-        4. 如果片上资源能够容纳修正后的ABC，则完成
-        5. 如果不能容纳，则减少ABC的bram分配，然后回到上一步重新修正
+        4. 如果片上资源能够容纳修正后的ABC, 则完成
+        5. 如果不能容纳, 则减少ABC的bram分配, 然后回到上一步重新修正
         ''' 
         xxlog("Fixing bram_C_need...")
         # 1. 从切块结果中找到相乘边(A的上边和B的左边)最小的矩阵块
@@ -1673,7 +1673,7 @@ def analyse_resources_first_time(
             max_len_support // min_matrix_len 
         xxlog("Result get per cycle per bram group per calculation unit: %d"%(
             result_per_cycle_per_bram_group_per_calc_unit))
-        # 2. 每个bram_group里C所需要的bram数需要在1的基础上，
+        # 2. 每个bram_group里C所需要的bram数需要在1的基础上, 
         #   再乘上每块里bram分配的计算单元组数。
         # 每组每周期得到的结果数
         result_per_cycle_per_bram_group = (
@@ -1682,7 +1682,7 @@ def analyse_resources_first_time(
         xxlog("Result per cycle per bram group: %d"%(
             result_per_cycle_per_bram_group))
         # 3. 根据C需要的带宽计算C实际需要的bram数
-        result_per_bram = 2 # 结果为32bit的条件下，每列bram每周期能写入的结果数
+        result_per_bram = 2 # 结果为32bit的条件下, 每列bram每周期能写入的结果数
         # 每个bram_group C需要的bram列数
         bram_col_C_need_per_bram_group = result_per_cycle_per_bram_group \
             // result_per_bram 
@@ -1699,7 +1699,7 @@ def analyse_resources_first_time(
         depth_C_need_per_bram_col = space_C_need_per_bram_col \
             // bytes_per_bram_line
         xxlog("Depth C need per bram col: %d"%(depth_C_need_per_bram_col))
-        # C需要每列bram的个数(由于不知道xilinx bram的计算方式，这一步目前只能查表)
+        # C需要每列bram的个数(由于不知道xilinx bram的计算方式, 这一步目前只能查表)
         bram36_C_need_per_col = get_bram_usage(width_per_bram, 
             depth_C_need_per_bram_col)[0]
         bram18_C_need_per_col = get_bram_usage(width_per_bram, 
@@ -1733,12 +1733,12 @@ def analyse_resources_first_time(
         else:
             total_bram_need = total_bram_need_per_bram_group * bram_group
         
-        # 如果C修正后bram仍然足够，则可以结束
+        # 如果C修正后bram仍然足够, 则可以结束
         if(total_bram_need <= int(bram_threshold*bram)):
             xxlog("Bram enough after fixed C")
             break
         
-        # C修正后，bram不足，对bram使用进行修正
+        # C修正后, bram不足, 对bram使用进行修正
         xxlog("Bram not enough after fixed C, try to decrease bram...")
         if(max_len_support > 512 or bram_group > 1):
             if(bram_group == 1):
@@ -1794,7 +1794,7 @@ def analyse_resources_first_time(
         
         calc_unit_per_bram_group = 1
         if(total_lut_need - lut_counter_per_dsp*dsp <= int(lut_threshold*lut)):
-            # 如果资源充足，增加每个bram组的计算单元数量
+            # 如果资源充足, 增加每个bram组的计算单元数量
             xxlog("Try to double calculation unit")
             while(True):
                 total_lut_need *= 2
@@ -1858,7 +1858,7 @@ def analyse_resources_first_time(
             ))
 
     return {
-        # bram组数(组边长小于512时，此值为0)
+        # bram组数(组边长小于512时, 此值为0)
         "bram_group": bram_group,   
         # 每组bram中C的列数
         "bram_col_c_need_per_bram_group": bram_col_C_need_per_bram_group,
@@ -1890,9 +1890,9 @@ def split_tensor_expression_first_time(
     第一次拆分张量表达式
     3. 第一次拆分张量表达式
     对矩阵进行切块
-    1. 尽量切大块，但不超过片上支持的最大边长
+    1. 尽量切大块, 但不超过片上支持的最大边长
     2. 矩阵的相乘边要为2的幂
-    3. 矩阵的结果边要为合适的长度，使得本矩阵块能够填满bram的一行
+    3. 矩阵的结果边要为合适的长度, 使得本矩阵块能够填满bram的一行
     '''
     xxlog("Split tensor expression first time")
 
@@ -1910,9 +1910,9 @@ def split_tensor_expression_first_time(
     for shape in im2col_shape:
         original_shape.append(([shape[0][0], shape[0][1]], 
             [shape[1][0], shape[1][1]]))
-    # 切分结果。它是一个list。里面的每个元素是一个tuple，表示一层的切分结果。
-    # tuple里有两个元素，分别为A和B的切分结果，它们都是list
-    # 这两个list中每个包含n个list。每个list包含4个元素，分别为切块在
+    # 切分结果。它是一个list。里面的每个元素是一个tuple, 表示一层的切分结果。
+    # tuple里有两个元素, 分别为A和B的切分结果, 它们都是list
+    # 这两个list中每个包含n个list。每个list包含4个元素, 分别为切块在
     # 纵向和横向上的起止点
     divided_border = cut_im2col_matrix(
         im2col_shape,
@@ -1933,31 +1933,31 @@ def split_tensor_expression_first_time(
 
 
     '''
-    切分之后，如果切出来的矩阵边长均小于片上支持的最大矩阵边长，则考虑缩减C的空间
-    缩减方式：找到一个计算流程，使得
+    切分之后, 如果切出来的矩阵边长均小于片上支持的最大矩阵边长, 则考虑缩减C的空间
+    缩减方式：找到一个计算流程, 使得
     1. 尽可能多累加。
-    2. 传输边长小于等于64的矩阵时尽可能填满A和B。传输边长大于等于128的矩阵时，
-        由于每次只需要传输一个矩阵，不需要尽可能填满A和B
+    2. 传输边长小于等于64的矩阵时尽可能填满A和B。传输边长大于等于128的矩阵时, 
+        由于每次只需要传输一个矩阵, 不需要尽可能填满A和B
     根据该计算流程计算C的峰值占用空间
     '''
-    # 查找切块结果中最大矩阵边长(因为是为了检查C的峰值占用空间，所以应该检查A和B的结果边)
+    # 查找切块结果中最大矩阵边长(因为是为了检查C的峰值占用空间, 所以应该检查A和B的结果边)
 
-    # 1. 因为现在没有限定矩阵一定是方阵，所以仅检查一条边是没用的，
-    #   需要同时检查A和B的结果边。但又不知道A和B中子矩阵的对应关系，所以需要先按行列编号，
+    # 1. 因为现在没有限定矩阵一定是方阵, 所以仅检查一条边是没用的, 
+    #   需要同时检查A和B的结果边。但又不知道A和B中子矩阵的对应关系, 所以需要先按行列编号, 
     #   才能确定A和B中的哪两个矩阵应该对应相乘。
 
-    # 子矩阵的边长。它是一个list。里面的每个元素是一个tuple，表示一层的子矩阵边长
-    # tuple里包含两个元素，它们都是list，分别表示A和B的子矩阵边长
-    # 这两个list中每个包含多个list，表示A或B一行子矩阵的边长
-    # 每个list中包含多个tuple，表示该行每个子矩阵的边长
-    # tuple中有两个元素，分别为height和width
+    # 子矩阵的边长。它是一个list。里面的每个元素是一个tuple, 表示一层的子矩阵边长
+    # tuple里包含两个元素, 它们都是list, 分别表示A和B的子矩阵边长
+    # 这两个list中每个包含多个list, 表示A或B一行子矩阵的边长
+    # 每个list中包含多个tuple, 表示该行每个子矩阵的边长
+    # tuple中有两个元素, 分别为height和width
     xxlog("Assigning index to divide submatrix...")
     submatrix_size = get_submatrix_size(divided_border)
 
 
-    # 2. 同时检查A和B对应矩阵的结果边的长度。由于如果子矩阵边长达到了最大值，就一定会把
-    #   C占满，所以不需要考虑累加的问题，只需要检查是否达到最大值即可。
-    #   另一方面，子矩阵边长不可能超过max_len_support，所以最大值为max_len_support
+    # 2. 同时检查A和B对应矩阵的结果边的长度。由于如果子矩阵边长达到了最大值, 就一定会把
+    #   C占满, 所以不需要考虑累加的问题, 只需要检查是否达到最大值即可。
+    #   另一方面, 子矩阵边长不可能超过max_len_support, 所以最大值为max_len_support
     xxlog("Finding if there is a pair of matrix of A and B to be matmuled " \
         "has the result side with length equal to or larger than " \
         "max_len_support...")
@@ -1965,7 +1965,7 @@ def split_tensor_expression_first_time(
     for layer in submatrix_size:
         submatrix_size_A = layer[0]
         submatrix_size_B = layer[1]
-        # 将每个子矩阵视为一个元素时，矩阵AB的尺寸
+        # 将每个子矩阵视为一个元素时, 矩阵AB的尺寸
         shape_A = (len(submatrix_size_A), len(submatrix_size_A[0]))
         shape_B = (len(submatrix_size_B), len(submatrix_size_B[0]))
         for i in range(shape_A[0]):
@@ -1980,7 +1980,7 @@ def split_tensor_expression_first_time(
                         break
     xxlog("Found: %s"%(has_max_matrix))
 
-    # 如果找到了结果边均达到max_len_support的矩阵，说明C一定是占满的
+    # 如果找到了结果边均达到max_len_support的矩阵, 说明C一定是占满的
     if(has_max_matrix):
         xxlog("Since matrix with side length equal to or larger than " \
             "max_len_support is found, C is full used, and the function " \
@@ -1993,12 +1993,12 @@ def split_tensor_expression_first_time(
         }
 
 
-    # 如果没找到结果边均达到max_len_support的矩阵，说明C可能无法占满
+    # 如果没找到结果边均达到max_len_support的矩阵, 说明C可能无法占满
     # 寻找C的最大使用量
     xxlog("Founding the max usage of C")
     # 切分张量表达式
     tensor_expr = split_tensor_expression(submatrix_size)
-    # 规划计算流程，同时寻找C最大使用量
+    # 规划计算流程, 同时寻找C最大使用量
     bram_group = first_analyse_result["bram_group"]
     depth_per_bram = 512
     bram_col_C_need_per_bram_group = first_analyse_result[
@@ -2059,7 +2059,7 @@ def analyse_resources_second_time(
     C_max_usage = first_tensor_expression["c_max_usage"]
 
     if(optimize < 1):
-        # 如果optimize等级为0，则不尝试压缩C
+        # 如果optimize等级为0, 则不尝试压缩C
         second_analyse_result = first_analyse_result.copy()
         second_analyse_result["more_radical_allocation"] = False
         xxlog("Found C fully used. Keep old allocation. No more radical " \
@@ -2089,7 +2089,7 @@ def analyse_resources_second_time(
         return second_analyse_result
 
     if(is_C_fulled_used):
-        # 如果C已经占满，则返回原来结果以及不需要更激进的分配
+        # 如果C已经占满, 则返回原来结果以及不需要更激进的分配
         second_analyse_result = first_analyse_result.copy()
         second_analyse_result["more_radical_allocation"] = False
         xxlog("Found C fully used. Keep old allocation. No more radical " \
@@ -2117,7 +2117,7 @@ def analyse_resources_second_time(
             second_analyse_result["lut_avaliable"],
             second_analyse_result["more_radical_allocation"]))
         return second_analyse_result
-    
+
     # 如果C没有占满
     xxlog("Found C not fully used, try to decrease C usage")
     # C最大使用量除以bram组数得到每组bram中C的用量
@@ -2133,7 +2133,7 @@ def analyse_resources_second_time(
         old_bram_col_C_need_per_bram_group)
     xxlog("C usage per bram col: %d"%(C_usage_per_bram_col))
     
-    # 再除以8字节，得到每列需要的深度
+    # 再除以8字节, 得到每列需要的深度
     C_depth_per_bram_col = C_usage_per_bram_col // 8
     xxlog("C depth per bram col: %d"%(C_depth_per_bram_col))
     
@@ -2168,7 +2168,7 @@ def analyse_resources_second_time(
     bram_avaliable = first_analyse_result["bram_avaliable"]
     xxlog("bram avaliable: %d"%(bram_avaliable))
     
-    # bram可用容量减去C的占用，得到可给AB使用的容量
+    # bram可用容量减去C的占用, 得到可给AB使用的容量
     bram_for_AB = bram_avaliable - C_bram_need
     xxlog("bram can used by A and B: %d"%(bram_for_AB))
     
@@ -2218,7 +2218,7 @@ def analyse_resources_second_time(
             xxlog("Merge bram_group to %d, max_len_support to %d"%(
                 bram_group, max_len_support))
     
-    # 相比于原来的，最大矩阵大小是否已经提高了一级
+    # 相比于原来的, 最大矩阵大小是否已经提高了一级
     xxlog("Judging if the max_len_support is increased")
     old_max_len_support = first_analyse_result["max_matrix_len_support"]
     has_increased = False
@@ -2261,7 +2261,7 @@ def analyse_resources_second_time(
             total_lut_need, int(lut_threshold*lut)))
 
         if(total_lut_need > int(lut_threshold*lut)):
-            # 如果计算单元不够，返回最初的版本
+            # 如果计算单元不够, 返回最初的版本
             xxlog("Lut is not enough under new condition")
             xxlog("Go back to original condition")
             second_analyse_result = first_analyse_result.copy()
@@ -2295,7 +2295,7 @@ def analyse_resources_second_time(
         
         calc_unit_per_bram_group = 1
         if(total_lut_need - lut_counter_per_dsp*dsp <= int(lut_threshold*lut)):
-            # 如果资源充足，增加每个bram组的计算单元数量
+            # 如果资源充足, 增加每个bram组的计算单元数量
             xxlog("Try to double calculation unit")
             while(True):
                 total_lut_need *= 2
@@ -2317,7 +2317,7 @@ def analyse_resources_second_time(
                             int(lut_threshold*lut)))
                     break
         
-        # 在新的max_len_support下，计算bram需求
+        # 在新的max_len_support下, 计算bram需求
         xxlog("Calculating new bram allocation in new condition")
         # 计算min_len_support
         min_len_support = 8
@@ -2344,7 +2344,7 @@ def analyse_resources_second_time(
             current_layer_min_matrix_len = min(cut_result_A)
             min_matrix_len = min(min_matrix_len, current_layer_min_matrix_len)
         xxlog("Min matrix block need to calculate is %d"%(min_matrix_len))
-        # 每组bram，每组计算单元每周期输出结果数
+        # 每组bram, 每组计算单元每周期输出结果数
         result_per_bram_group_per_calc_unit = max_len_support // min_matrix_len
         xxlog("result number per bram_group per calc_unit: %d"%(
             result_per_bram_group_per_calc_unit))
@@ -2429,7 +2429,7 @@ def analyse_resources_second_time(
                 more_radical_allocation
             return second_analyse_result
         else:
-            # 如果bram带宽不够，返回最初的版本
+            # 如果bram带宽不够, 返回最初的版本
             # # 正常不应该到这里
             xxlog("Bram bandwidth is not enough under new condition")
             xxlog("Go back to original condition")
@@ -2465,7 +2465,7 @@ def analyse_resources_second_time(
     # 如果矩阵大小没有提高
 
     if(optimize < 2):
-        # 如果optimize等级为0或1，则不尝试更激进地压缩C
+        # 如果optimize等级为0或1, 则不尝试更激进地压缩C
         second_analyse_result = first_analyse_result.copy()
         second_analyse_result["more_radical_allocation"] = False
         xxlog("Found C fully used. Keep old allocation. No more radical " \
@@ -2506,7 +2506,7 @@ def analyse_resources_second_time(
     bram_avaliable = first_analyse_result["bram_avaliable"]
     xxlog("bram avaliable: %d"%(bram_avaliable))
     
-    # bram可用容量减去C的占用，得到可给AB使用的容量
+    # bram可用容量减去C的占用, 得到可给AB使用的容量
     bram_for_AB = bram_avaliable - C_bram_need
     xxlog("bram can used by A and B: %d"%(bram_for_AB))
     
@@ -2556,7 +2556,7 @@ def analyse_resources_second_time(
             xxlog("Merge bram_group to %d, max_len_support to %d"%(
                 bram_group, max_len_support))
     
-    # 相比于原来的，最大矩阵大小是否已经提高了一级
+    # 相比于原来的, 最大矩阵大小是否已经提高了一级
     xxlog("Judging if the max_len_support is increased")
     old_max_len_support = first_analyse_result["max_matrix_len_support"]
     has_increased = False
@@ -2629,7 +2629,7 @@ def analyse_resources_second_time(
         total_lut_need, int(lut_threshold*lut)))
 
     if(total_lut_need > int(lut_threshold*lut)):
-        # 如果计算单元不够，返回最初的版本
+        # 如果计算单元不够, 返回最初的版本
         xxlog("Lut is not enough under new condition")
         xxlog("Go back to original condition")
         second_analyse_result = first_analyse_result.copy()
@@ -2663,7 +2663,7 @@ def analyse_resources_second_time(
     
     calc_unit_per_bram_group = 1
     if(total_lut_need - lut_counter_per_dsp*dsp <= int(lut_threshold*lut)):
-        # 如果资源充足，增加每个bram组的计算单元数量
+        # 如果资源充足, 增加每个bram组的计算单元数量
         xxlog("Try to double calculation unit")
         while(True):
             total_lut_need *= 2
@@ -2685,7 +2685,7 @@ def analyse_resources_second_time(
                         int(lut_threshold*lut)))
                 break
 
-    # 在新的max_len_support下，计算bram需求
+    # 在新的max_len_support下, 计算bram需求
     xxlog("Calculating new bram allocation in new condition")
     # 计算min_len_support
     min_len_support = 8
@@ -2712,7 +2712,7 @@ def analyse_resources_second_time(
         current_layer_min_matrix_len = min(cut_result_A)
         min_matrix_len = min(min_matrix_len, current_layer_min_matrix_len)
     xxlog("Min matrix block need to calculate is %d"%(min_matrix_len))
-    # 每组bram，每组计算单元每周期输出结果数
+    # 每组bram, 每组计算单元每周期输出结果数
     result_per_bram_group_per_calc_unit = max_len_support // min_matrix_len
     xxlog("result number per bram_group per calc_unit: %d"%(
         result_per_bram_group_per_calc_unit))
@@ -2797,7 +2797,7 @@ def analyse_resources_second_time(
             more_radical_allocation
         return second_analyse_result
     else:
-        # 如果bram带宽不够，返回最初的版本
+        # 如果bram带宽不够, 返回最初的版本
         # # 正常不应该到这里
         xxlog("Bram bandwidth is not enough under new condition")
         xxlog("Go back to original condition")
@@ -2903,7 +2903,7 @@ def split_tensor_expression_second_time(
 
     # 根据是否激进分配进行不同操作
     if(not more_radical_allocation):
-        # 如果没有激进分配，直接返回结果
+        # 如果没有激进分配, 直接返回结果
         return {
             # 资源分配结果
             "resource_analyse_result": second_analyse_result,
@@ -2915,7 +2915,7 @@ def split_tensor_expression_second_time(
             "c_max_usage": c_max_usage
         }
     
-    # 如果有激进分配，对两种方案进行比较
+    # 如果有激进分配, 对两种方案进行比较
 
     # 确定保守方案的参数
     xxlog("Read conservative parameters from first analyse result")
@@ -3055,6 +3055,9 @@ def analyse_resources_third_time(
     total_bram_need = resource_analyse_result["total_bram_need"]
     bram_avaliable = resource_analyse_result["bram_avaliable"]
     max_len_support = resource_analyse_result["max_matrix_len_support"]
+    min_len_support = resource_analyse_result["min_matrix_len_support"]
+    calc_unit_per_bram_group = resource_analyse_result[
+        "calc_unit_per_bram_group"]
     bram_A_need = max_len_support // 8 if(bram_group == 0) else \
         (max_len_support // 8) * (max_len_support // 512) * bram_group
     bram_B_need = max_len_support // 8 if(bram_group == 0) else \
@@ -3063,8 +3066,39 @@ def analyse_resources_third_time(
 
     # 尝试增加C的带宽
     if(try_increase_c_bandwidth):
+        '''
+        C的带宽必须不能超过结果矩阵块的一行, 否则后处理时无法选择channel
+        所以必须找到结果矩阵块中最小的上边, 并依此对C的带宽进行限制
+        '''
+        # 切分im2col矩阵
+        divided_border = cut_im2col_matrix(
+            im2col_shape,
+            calculation_graph,
+            max_len_support,
+            min_len_support
+        )
+        
+        # 校验切分结果
+        check_divide_result(divided_border)
+
+        # 计算切分后的子矩阵边长
+        submatrix_size = get_submatrix_size(divided_border)
+
+        # 寻找最小的结果矩阵上边长
+        min_side = 2147483647
+        for layer_index, layer in enumerate(submatrix_size):
+            submatrix_size_A = layer[0]
+            submatrix_size_B = layer[1]
+            for row in submatrix_size_B:
+                for block in row:
+                    min_side = min(min_side, block[1])
+        bram_col_c_need_per_bram_group_limit = min_side * \
+            calc_unit_per_bram_group // 2
+        
+
         temp_bram_col_c_need_per_bram_group = bram_col_c_need_per_bram_group
-        temp_depth_c_need_per_bram_col = depth_c_need_per_bram_col
+        temp_depth_c_need_per_bram_col = math.ceil(depth_c_need_per_bram_col 
+            / 512) * 512
         bram_c_need_per_col = get_bram_usage(
             64, temp_depth_c_need_per_bram_col)
         bram36_c_need_per_col = bram_c_need_per_col[0]
@@ -3075,12 +3109,17 @@ def analyse_resources_third_time(
         bram_C_need = bram_c_need_per_group if(bram_group == 0) else \
             bram_c_need_per_group * bram_group
         temp_total_bram_need = bram_A_need + bram_B_need + bram_C_need
-        # 尝试翻倍C的带宽，同时减半C的深度，直到bram不够
-        while(temp_total_bram_need < bram_avaliable):
+        # 尝试翻倍C的带宽, 同时减半C的深度, 直到bram不够
+        while(temp_total_bram_need < bram_avaliable and 
+            temp_bram_col_c_need_per_bram_group <= 
+            bram_col_c_need_per_bram_group_limit):
             temp_bram_col_c_need_per_bram_group *= 2
             temp_depth_c_need_per_bram_col //= 2
+            # 深度向上取整到512用于计算容量
+            temp_depth_c_need_per_bram_col_to_calc = math.ceil(
+                temp_depth_c_need_per_bram_col / 512) * 512
             bram_c_need_per_col = get_bram_usage(
-                64, temp_depth_c_need_per_bram_col)
+                64, temp_depth_c_need_per_bram_col_to_calc)
             bram36_c_need_per_col = bram_c_need_per_col[0]
             bram18_c_need_per_col = bram_c_need_per_col[1]
             bram_c_need_per_group = bram36_c_need_per_col * \
@@ -3090,11 +3129,25 @@ def analyse_resources_third_time(
             bram_C_need = bram_c_need_per_group if(bram_group == 0) else \
                 bram_c_need_per_group * bram_group
             temp_total_bram_need = bram_A_need + bram_B_need + bram_C_need
-        # 此时bram使用量已经超过，回退一步
+        # 此时bram使用量已经超过, 回退一步
         temp_bram_col_c_need_per_bram_group //= 2
         temp_depth_c_need_per_bram_col *= 2
         bram_col_c_need_per_bram_group = temp_bram_col_c_need_per_bram_group
         depth_c_need_per_bram_col = temp_depth_c_need_per_bram_col
+        depth_c_need_per_bram_col = math.ceil(
+            depth_c_need_per_bram_col / 512) * 512
+        
+        bram_c_need_per_col = get_bram_usage(
+            64, depth_c_need_per_bram_col)
+        bram36_c_need_per_col = bram_c_need_per_col[0]
+        bram18_c_need_per_col = bram_c_need_per_col[1]
+        bram_c_need_per_group = bram36_c_need_per_col * \
+            bram_col_c_need_per_bram_group + math.ceil(
+            bram18_c_need_per_col * 
+            bram_col_c_need_per_bram_group / 2)
+        bram_C_need = bram_c_need_per_group if(bram_group == 0) else \
+            bram_c_need_per_group * bram_group
+        total_bram_need = bram_A_need + bram_B_need + bram_C_need
     
     # 返回结果
     third_analyse_result = resource_analyse_result.copy()
@@ -3102,6 +3155,8 @@ def analyse_resources_third_time(
         bram_col_c_need_per_bram_group
     third_analyse_result["depth_c_need_per_bram_col"] = \
         depth_c_need_per_bram_col
+    third_analyse_result["total_bram_need"] = \
+        total_bram_need
     
     return third_analyse_result
 

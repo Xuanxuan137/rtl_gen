@@ -37,8 +37,8 @@ def gen_fc(
     MUX_WIDTH: int,                     # mux位宽
     DATA_WIDTH: int,                    # 数据位宽
     DATA_NUMBER: int,                   # 并行输入数据数量
-    HIDDEN_LEN: int,                    # 上一层节点数量
-    OUTPUT_LEN: int,                    # 本层节点数量
+    HIDDEN_LEN: int,                    # 输入层节点数量的最大值
+    OUTPUT_LEN: int,                    # 本层节点数量的最大值
     BIAS: list,                         # 偏置。list里存各层bias的np.ndarray
     COE: list,                          # coe
     RSHIFT: list,                       # rshift
@@ -79,7 +79,7 @@ def gen_fc(
     n = int(math.ceil(n/8))*8
     code += indent + "input [%d:0] out_len,\n"%(n-1)
     code += indent + "input [%d:0] mux,\n"%(MUX_WIDTH-1)
-    code += indent + "input do_relu,\n"
+    code += indent + "input [3:0] activation,\n"
     code += indent + "output reg [%d:0] dout,\n"%(DATA_WIDTH-1)
     code += indent + "output reg out_valid,\n"
     code = code[:-2] + "\n" # 去除最后一个逗号
@@ -132,7 +132,7 @@ def gen_fc(
     code += indent + "wire signed [%d:0] data_use[%d:0];\n"%(
         DATA_WIDTH, DATA_NUMBER-1)
     for i in range(DATA_NUMBER):
-        code += indent + "assign data_use[%d] = {1'b0, data[addr][%d:%d];\n"%(
+        code += indent + "assign data_use[%d] = {1'b0, data[addr][%d:%d]};\n"%(
             i, DATA_WIDTH*DATA_NUMBER-1-i*DATA_WIDTH, 
             DATA_WIDTH*DATA_NUMBER-DATA_WIDTH-i*DATA_WIDTH
         )
@@ -445,7 +445,7 @@ def gen_fc(
     #   # fp_temp = temp
     code += indent + "fp_temp_sign <= accu_add_bias[31];\n"
     code += indent + "fp_temp <= {{(accu_add_bias - accu_add_bias[31]) ^ " \
-        "({32{accu_add_bias[31]}, 16'b0};\n"
+        "({32{accu_add_bias[31]}})}, 16'b0};\n"
     #   # fp_temp *= coe
     code += indent + "fp_temp_mult_coe_sign <= fp_temp_sign;\n"
     code += indent + "fp_temp_mult_coe <= fp_temp_mult_coe_temp[63:16];\n"
@@ -455,16 +455,16 @@ def gen_fc(
     #   # t = t + zero_y
     code += indent + "t_add <= t + zero_y;\n"
     #   # relu
-    code += indent + "if(do_relu) begin\n"
+    code += indent + "if(activation == 0) begin\n"
     indent = "\t\t\t\t"
-    code += indent + "relu <= (t_add < zero_y) ? zero_y : \n"
+    code += indent + "relu <= (t_add < 0) ? 0 : \n"
     code += indent + "        (t_add > qmax) ? qmax : \n"
     code += indent + "        t_add;\n"
     indent = "\t\t\t"
     code += indent + "end\n"
-    code += indent + "else begin\n"
+    code += indent + "else if(activation == 1) begin\n"
     indent = "\t\t\t\t"
-    code += indent + "relu <= (t_add < 0) ? 0 : \n"
+    code += indent + "relu <= (t_add < zero_y) ? zero_y : \n"
     code += indent + "        (t_add > qmax) ? qmax : \n"
     code += indent + "        t_add;\n"
     indent = "\t\t\t"
