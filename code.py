@@ -354,6 +354,25 @@ def gen_code(
     )
 
     # 生成main
+    weight_buffer_col = (max_len_support // 8) if(bram_group == 0) else \
+        (max_len_support // 8) * bram_group
+    weight_buffer_depth = 512 if(bram_group == 0) else max_len_support
+    feature_map_buffer_col = (max_len_support // 8) if(bram_group == 0) else \
+        (max_len_support // 8) * bram_group
+    feature_map_buffer_depth = 512 if(bram_group == 0) else max_len_support
+    output_buffer_col = bram_col_c_need_per_bram_group if(bram_group == 0) \
+        else bram_col_c_need_per_bram_group * bram_group
+    output_buffer_depth = depth_c_need_per_bram_col
+    main_code = top.gen_top(
+        WEIGHT_BUF_COL=weight_buffer_col,
+        WEIGUT_BUF_DEPTH=weight_buffer_depth,
+        FEATURE_MAP_BUF_COL=feature_map_buffer_col,
+        FEATURE_MAP_BUF_DEPTH=feature_map_buffer_depth,
+        OUTPUT_BUF_COL=output_buffer_col,
+        OUTPUT_BUF_DEPTH=output_buffer_depth,
+    )
+    with open("output/top.v", "w") as f:
+        f.write(main_code)
 
     # 生成c
 

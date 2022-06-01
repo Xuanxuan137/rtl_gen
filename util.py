@@ -35,3 +35,12 @@ def xxlog(msg: str, type=None):
 
 def clear_log():
     os.system("rm logs/*")
+
+def code_count():
+    count = 0
+    files = os.listdir(".")
+    for file in files:
+        if(file[-3:] == ".py"):
+            with open(file, "r") as f:
+                count += len(f.readlines())
+    print(count)
