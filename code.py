@@ -211,6 +211,19 @@ def get_conv_qmin_qmax(calculation_graph):
     return qmin, qmax
 
 
+def get_conv_channel(calculation_graph):
+    '''
+    Get channel of each conv layer
+    '''
+    channels = []
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.Conv2d or
+            type(node) == op.QConv2d):
+            channel = node.output_channel
+            channels.append(channel)
+    return channels
+
+
 def gen_code(
     analyse_result,
     data_on_chip,
@@ -363,6 +376,8 @@ def gen_code(
     output_buffer_col = bram_col_c_need_per_bram_group if(bram_group == 0) \
         else bram_col_c_need_per_bram_group * bram_group
     output_buffer_depth = depth_c_need_per_bram_col
+    conv_channels = get_conv_channel(calculation_graph)
+    pp_channel = max(conv_channels)
     main_code = top.gen_top(
         WEIGHT_BUF_COL=weight_buffer_col,
         WEIGUT_BUF_DEPTH=weight_buffer_depth,
@@ -370,6 +385,16 @@ def gen_code(
         FEATURE_MAP_BUF_DEPTH=feature_map_buffer_depth,
         OUTPUT_BUF_COL=output_buffer_col,
         OUTPUT_BUF_DEPTH=output_buffer_depth,
+        MAX_LEN_SUPPORT=max_len_support,
+        CONV_MUX_WIDTH=conv_mux_width,
+        CALC_UNIT_PER_BRAM_GROUP=calc_unit_per_bram_group,
+        CONV_OUTPUT_PORTS=conv_output_ports,
+        FC_HIDDEN_LEN=fc_hidden_len,
+        FC_OUTPUT_LEN=fc_output_len,
+        FC_MUX_WIDTH=fc_mux_width,
+        PP_CHANNEL=pp_channel,
+        PP_MUX_WIDTH=pp_mux_width,
+        INSTR_ANALYSE_RESULT=instr_analyse_result,
     )
     with open("output/top.v", "w") as f:
         f.write(main_code)

@@ -293,7 +293,7 @@ def analyse_instr(
     pl_start_channel_for_pp = math.ceil(math.log2(max_channel))
     
     # # # layer mux
-    pl_layer_mux_for_pp = max(math.ceil(math.log(conv_amount)), 1)
+    pl_layer_mux_for_pp = max(math.ceil(math.log2(conv_amount)), 1)
     
     # # # output buffer read start line
     pl_output_buffer_read_start_line_for_pp = math.ceil(math.log2(

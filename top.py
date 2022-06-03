@@ -1,7 +1,21 @@
 
 
 
+from distutils.util import strtobool
 import math
+
+
+def decimal_to_one_hot_binary(value, width):
+    '''
+    tranfer decimal value to binary one-hot code with 'width' width
+    '''
+    code = ""
+    for i in range(value):
+        code = "0" + code
+    code = "1" + code
+    for i in range(width - value - 1):
+        code = "0" + code
+    return code
 
 
 def gen_top(
@@ -11,6 +25,16 @@ def gen_top(
     FEATURE_MAP_BUF_DEPTH: int, # depth of feature map buffer
     OUTPUT_BUF_COL: int,        # number of output buffer columns
     OUTPUT_BUF_DEPTH: int,      # depth of output buffer
+    MAX_LEN_SUPPORT: int,       # max len support
+    CONV_MUX_WIDTH: int,        # conv layer mux width
+    CALC_UNIT_PER_BRAM_GROUP: int,  # calc unit per bram group
+    CONV_OUTPUT_PORTS: int,     # conv output ports
+    FC_HIDDEN_LEN: int,         # max hidden len of fc layers
+    FC_OUTPUT_LEN: int,         # max output len of fc layers
+    FC_MUX_WIDTH: int,          # fc layer mux width
+    PP_CHANNEL: int,            # max channel of conv
+    PP_MUX_WIDTH: int,          # pp layer mux width
+    INSTR_ANALYSE_RESULT: dict, # instructions' bit width dict
 ):
     '''
     Gen top module of the accelerator
@@ -202,6 +226,210 @@ def gen_top(
         code += indent + "bram_r_addrb[%d] = 0;\n"%(i)
     indent = "\t"
     code += indent + "end\n"
+
+
+    # signals of modules
+    # signals of conv
+    for unit in range(CALC_UNIT_PER_BRAM_GROUP):
+        code += indent + "reg [%d:0] conv_mux_%d;\n"%(CONV_MUX_WIDTH-1, unit)
+        code += indent + "reg conv_in_valid_%d;\n"%(unit)
+        code += indent + "reg [%d:0] conv_ina_%d;\n"%(
+            WEIGHT_BUF_COL*8*8-1, unit)
+        code += indent + "reg [%d:0] conv_inb_%d;\n"%(
+            FEATURE_MAP_BUF_COL*8*8-1, unit)
+        for port in CONV_OUTPUT_PORTS:
+            if(port == MAX_LEN_SUPPORT):
+                code += indent + "wire [31:0] conv_add%d_%d;\n"%(port, unit)
+                code += indent + "wire conv_add%d_valid_%d;\n"%(port, unit)
+                continue
+            origin_width = 8
+            use_width = origin_width + 1    # unsign extend width
+            mult_width = use_width * 2      # with after mult
+            accu = 1
+            width = mult_width
+            while(accu < port):
+                accu *= 2
+                width += 1
+            total_width = (MAX_LEN_SUPPORT // port) * width
+            code += indent + "wire [%d:0] conv_add%d_%d;\n"%(
+                total_width, port, unit)
+            code += indent + "wire conv_add%d_valid_%d;\n"%(port, unit)
+        
+    # signals of fc
+    dma_bit_width = 64
+    hidden_len_number = math.ceil(FC_HIDDEN_LEN / 8)
+    hidden_len_width = math.ceil(math.ceil(math.log2(hidden_len_number)) / 8) \
+        * 8
+    output_len_width = math.ceil(math.ceil(math.log2(FC_OUTPUT_LEN)) / 8) * 8
+    fc_activation_width = INSTR_ANALYSE_RESULT["ps_activation_for_fc"]
+    code += indent + "reg [%d:0] fc_din;\n"%(dma_bit_width-1)
+    code += indent + "reg fc_invalid;\n"
+    code += indent + "reg fc_datatype;\n"
+    code += indent + "reg [%d:0] fc_hidden_len;\n"%(hidden_len_width-1)
+    code += indent + "reg [%d:0] fc_output_len;\n"%(output_len_width-1)
+    code += indent + "reg [%d:0] fc_mux;\n"%(FC_MUX_WIDTH-1)
+    code += indent + "reg [%d:0] fc_activation;\n"%(fc_activation_width-1)
+    code += indent + "wire [7:0] fc_dout;\n"
+    code += indent + "wire fc_outvalid;\n"
+
+    # signals of post_process
+    pp_activation_width = INSTR_ANALYSE_RESULT["pl_activation_for_pp"]
+    for unit in range(CALC_UNIT_PER_BRAM_GROUP):
+        output_buf_col_per_calc_unit = OUTPUT_BUF_COL // \
+            CALC_UNIT_PER_BRAM_GROUP
+        pp_channel_width = math.ceil(math.ceil(math.log2(PP_CHANNEL)) / 8) * 8
+        code += indent + "reg [%d:0] pp_din_%d;\n"%(
+            output_buf_col_per_calc_unit * 64 - 1, unit)
+        code += indent + "reg [%d:0] pp_channel_%d;\n"%(
+            pp_channel_width-1, unit)
+        code += indent + "reg [%d:0] pp_mux_%d;\n"%(PP_MUX_WIDTH-1, unit)
+        code += indent + "reg [%d:0] pp_activation_%d;\n"%(
+            pp_activation_width-1, unit)
+        code += indent + "wire [%d:0] pp_dout_%d;\n"%(
+            output_buf_col_per_calc_unit * 16 - 1, unit)
+
+    # signals of instrset
+    pl_instr_addr_width = INSTR_ANALYSE_RESULT["ps_instr_begin_addr_for_conv"]
+    pl_instr_width = INSTR_ANALYSE_RESULT["pl_bit_width_need"]
+    code += indent + "reg [%d:0] instrset_addr;\n"%(pl_instr_addr_width-1)
+    code += indent + "wire [%d:0] instrset_dout;\n"%(pl_instr_width-1)
+
+    # initialize signals of modules
+    for unit in range(CALC_UNIT_PER_BRAM_GROUP):
+        code += indent + "conv_mux_%d = 0;\n"%(unit)
+        code += indent + "conv_in_valid_%d = 0;\n"%(unit)
+        code += indent + "conv_ina_%d = 0;\n"%(unit)
+        code += indent + "conv_inb_%d = 0;\n"%(unit)
+    code += indent + "fc_din = 0;\n"
+    code += indent + "fc_invalid = 0;\n"
+    code += indent + "fc_datatype = 0;\n"
+    code += indent + "fc_hidden_len = 0;\n"
+    code += indent + "fc_output_len = 0;\n"
+    code += indent + "fc_mux = 0;\n"
+    code += indent + "fc_activation = 0;\n"
+    for unit in range(CALC_UNIT_PER_BRAM_GROUP):
+        code += indent + "pp_din_%d = 0;\n"%(unit)
+        code += indent + "pp_channel_%d = 0;\n"%(unit)
+        code += indent + "pp_mux_%d = 0;\n"%(unit)
+        code += indent + "pp_activation_%d = 0;\n"%(unit)
+    code += indent + "instrset_addr = 0;\n"
+
+
+    # signals for control
+    # signals for instructions from ps
+    ps_instr_width = INSTR_ANALYSE_RESULT["ps_bit_width_need"]
+    ps_calc_type_width = INSTR_ANALYSE_RESULT["ps_calculation_type"]
+    ps_weight_len_width = INSTR_ANALYSE_RESULT[
+        "ps_weight_data_length_for_conv"]
+    ps_feature_map_len_width = INSTR_ANALYSE_RESULT[
+        "ps_feature_map_data_length_for_conv"]
+    ps_instr_begin_addr_width = INSTR_ANALYSE_RESULT[
+        "ps_instr_begin_addr_for_conv"]
+    ps_instr_end_addr_width = INSTR_ANALYSE_RESULT[
+        "ps_instr_end_addr_for_conv"]
+    code += indent + "reg [%d:0] ps_instruction;\n"%(ps_instr_width-1)
+    code += indent + "reg [%d:0] ps_calc_type;\n"%(ps_calc_type_width-1)
+    code += indent + "reg [%d:0] ps_weight_len;\n"%(ps_weight_len_width-1)
+    code += indent + "reg [%d:0] ps_feature_map_len;\n"%(
+        ps_feature_map_len_width-1)
+    code += indent + "reg [%d:0] ps_instr_start_addr;\n"%(
+        ps_instr_begin_addr_width-1)
+    code += indent + "reg [%d:0] ps_instr_end_addr;\n"%(
+        ps_instr_end_addr_width-1)
+    
+    # signals for instructions from pl
+    pl_instr_width = INSTR_ANALYSE_RESULT["pl_bit_width_need"]
+    pl_calc_type_width = INSTR_ANALYSE_RESULT["pl_calculation_type"]
+    code += indent + "reg [%d:0] pl_instruction;\n"%(pl_instr_width-1)
+    code += indent + "reg [%d:0] pl_calc_type;\n"%(pl_calc_type_width-1)
+    # signals for convolution instruction
+    pl_mult_side_len_conv_width = INSTR_ANALYSE_RESULT[
+        "pl_mult_side_length_for_conv"]
+    pl_A_left_side_len_conv_width = INSTR_ANALYSE_RESULT[
+        "pl_A_left_side_length_for_conv"]
+    pl_B_up_side_len_conv_width = INSTR_ANALYSE_RESULT[
+        "pl_B_up_side_length_for_conv"]
+    pl_weight_start_addr_conv_width = INSTR_ANALYSE_RESULT[
+        "pl_weight_buffer_read_start_line_for_conv"]
+    pl_feature_map_start_addr_conv_width = INSTR_ANALYSE_RESULT[
+        "pl_feature_map_buffer_read_start_line_for_conv"]
+    pl_output_start_addr_conv_width = INSTR_ANALYSE_RESULT[
+        "pl_output_buffer_store_start_line_for_conv"]
+    pl_save_type_conv_width = INSTR_ANALYSE_RESULT[
+        "pl_store_or_accumulate_for_conv"]
+    pl_layer_mux_conv_width = INSTR_ANALYSE_RESULT["pl_layer_mux_for_conv"]
+    code += indent + "reg [%d:0] pl_mult_side_len_conv;\n"%(
+        pl_mult_side_len_conv_width-1)
+    code += indent + "reg [%d:0] pl_A_left_side_len_conv;\n"%(
+        pl_A_left_side_len_conv_width-1)
+    code += indent + "reg [%d:0] pl_B_up_side_len_conv;\n"%(
+        pl_B_up_side_len_conv_width-1)
+    code += indent + "reg [%d:0] pl_weight_start_addr_conv;\n"%(
+        pl_weight_start_addr_conv_width-1)
+    code += indent + "reg [%d:0] pl_feature_map_start_addr_conv;\n"%(
+        pl_feature_map_start_addr_conv_width-1)
+    code += indent + "reg [%d:0] pl_output_start_addr_conv;\n"%(
+        pl_output_start_addr_conv_width-1)
+    code += indent + "reg [%d:0] pl_save_type_conv;\n"%(
+        pl_save_type_conv_width-1)
+    code += indent + "reg [%d:0] pl_mux_conv;\n"%(pl_layer_mux_conv_width-1)
+    # signals for post_process instructions
+    pl_side_len_pp_width = INSTR_ANALYSE_RESULT["pl_side_length_for_pp"]
+    pl_start_channel_pp_width = INSTR_ANALYSE_RESULT["pl_start_channel_for_pp"]
+    pl_layer_mux_pp_width = INSTR_ANALYSE_RESULT["pl_layer_mux_for_pp"]
+    pl_output_start_addr_pp_width = INSTR_ANALYSE_RESULT[
+        "pl_output_buffer_read_start_line_for_pp"]
+    pl_process_lines_pp_width = INSTR_ANALYSE_RESULT["pl_process_lines_for_pp"]
+    pl_activation_pp_width = INSTR_ANALYSE_RESULT["pl_activation_for_pp"]
+    code += indent + "reg [%d:0] pl_side_len_pp;\n"%(pl_side_len_pp_width-1)
+    code += indent + "reg [%d:0] pl_start_channel_pp;\n"%(
+        pl_start_channel_pp_width-1)
+    code += indent + "reg [%d:0] pl_mux_pp;\n"%(pl_layer_mux_pp_width-1)
+    code += indent + "reg [%d:0] pl_output_start_addr_pp;\n"%(
+        pl_output_start_addr_pp_width-1)
+    code += indent + "reg [%d:0] pl_process_lines_pp;\n"%(
+        pl_process_lines_pp_width-1)
+    code += indent + "reg [%d:0] pl_activation_pp;\n"%(
+        pl_activation_pp_width-1)
+    # signals for write back instructions
+    pl_write_len_wb_width = INSTR_ANALYSE_RESULT["pl_write_back_rows_for_wb"]
+    code += indent + "reg [%d:0] pl_write_len_wb;\n"%(pl_write_len_wb_width-1)
+    # signals for fc
+    ps_activation_fc_width = INSTR_ANALYSE_RESULT["ps_activation_for_fc"]
+    ps_hidden_channel_fc_width = INSTR_ANALYSE_RESULT[
+        "ps_hidden_channel_for_fc"]
+    ps_output_channel_fc_width = INSTR_ANALYSE_RESULT[
+        "ps_output_channel_for_fc"]
+    ps_layer_mux_fc_width = INSTR_ANALYSE_RESULT["ps_layer_mux_for_fc"]
+    code += indent + "reg [%d:0] ps_activation_fc;\n"%(
+        ps_activation_fc_width-1)
+    code += indent + "reg [%d:0] ps_hidden_channel_fc;\n"%(
+        ps_hidden_channel_fc_width-1)
+    code += indent + "reg [%d:0] ps_output_channel_fc;\n"%(
+        ps_output_channel_fc_width-1)
+    code += indent + "reg [%d:0] ps_layer_mux_fc;\n"%(ps_layer_mux_fc_width-1)
+
+    # signals for top state machine
+    states = [
+        "PS_INSTR_READ",
+        "PL_INSTR_READ",
+        "CONVOLUTION",
+        "POST_PROCESS",
+        "WRITE_BACK",
+        "FULLY_CONNECT",
+        "DATA_TRANSFER",
+        "PL_INSTR_FINISH",
+    ]
+    state_bit_width = len(states)
+    code += indent + "reg [%d:0] state;\n"%(state_bit_width-1)
+    for n, state in enumerate(states):
+        code += indent + "parameter [%d:0] %s = %d'b%s;\n"%(state_bit_width-1, 
+            state, state_bit_width,
+            decimal_to_one_hot_binary(n, state_bit_width))
+    code += indent + "reg [7:0] internal_state;\n"
+    code += indent + "reg [7:0] dma_state;\n"
+    print(CONV_OUTPUT_PORTS)
+
 
 
 
