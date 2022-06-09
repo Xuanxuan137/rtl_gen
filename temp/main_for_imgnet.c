@@ -6,8 +6,8 @@
 typedef unsigned char uint8;
 void read_data(unsigned char * test_images, int * test_labels)
 {
-    FILE * f_tei = fopen("../imgnet/imgnet_bin.bin", "rb");
-    FILE * f_tel = fopen("../imgnet/imgnet_bin_label.bin", "rb");
+    FILE * f_tei = fopen("../../../../../dataset/imgnet_bin/imgnet_bin.bin", "rb");
+    FILE * f_tel = fopen("../../../../../dataset/imgnet_bin/imgnet_bin_label.bin", "rb");
     if(fread(test_images, sizeof(uint8), TEST_NUM*CHANNEL*HEIGHT*WIDTH, f_tei) != TEST_NUM*CHANNEL*HEIGHT*WIDTH) {
         printf("fread size error at line %d\n", __LINE__);
     }

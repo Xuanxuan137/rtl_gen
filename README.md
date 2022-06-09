@@ -291,3 +291,124 @@ $$A+B+C<=[0.9*Total]$$
 而B受带宽限制，每周期只能读一行，无法同时供给A的两行，所以不行
 2. 如果新增的计算单元的宽度能够达到bram的宽度，则A的两行读取B的速度相同，B读出一行
 可以同时供给A的两行使用，计算速度翻倍
+
+
+
+### Instruction width alloction
+Since the side length of divided matrix are all power of 2, we can record
+them by the exponent, and in this way we need less bits.
+
+
+### How to design top generator for CONVOLUTION?
+Since the max matrix side length we have is no more than `max_len_support`, 
+and `max_len_support` is equal to the length of a bram line, we should read `n`
+bram_A lines per calc when `mult_side_len` is equal to `max_len_support` and 
+`calc_unit_per_bram_group` is equal to `n`. At the same time, we should read 
+1 bram_B line per cycle.
+Since the min matrix side length we have is no less than `min_len_support`, 
+and `min_len_support` is no less than sqrt of `max_len_support`, which means 
+that a minimum matrix can fill at least 1 bram line, we should also read 1
+bram_B line per cycle, and 1 bram_A line per calc if `mult_side_len`*
+`calc_unit_per_bram_group` is no more than `max_len_support`, or more than 1 
+lines if the product is more.
+So we do not need to care how many bram_B lines we should read per cycle, since 
+it is always 1. What we should care is how many bram_A lines we should read per 
+calc. 
+So, how many bram_A lines should we read per calc? 
+- if `mult_side_len`*`calc_unit_per_bram_group` <= `max_len_support`, 1 per calc
+- else, `mult_side_len`*`calc_unit_per_bram_group` // `max_len_support` per calc
+
+#### Total lines of bram that mat A and B cost
+Matrix A has a left side with len `A_left_side_len`
+Matrix A has a up side with len `mult_side_len`
+Matrix B has a left side with len `mult_side_len`
+Matrix B has a up side with len `B_up_side_len`
+So bram lines A cost is `A_left_side_len`*`mult_side_len`//`max_len_support`
+Bram lines B cost is `B_up_side_len`*`mult_side_len`//`max_len_support`
+Besides, we should notice that, since the side lengths are all power of 2,
+if calc_unit is more than 1, and lines of bram that mat A cost is more than 
+calc_unit, the lines of bram it cost must be multiple of calc_unit(or must
+be power of 2), so we do not worry about the situation that when reading mat A,
+we have to read lines of next mat.
+
+#### What is the latency of conv module?
+`2 + log2(accumulate_length)` cycles.
+For example, 10 cycles for add256.
+
+#### What should we do to calculate one convolution?
+1. Use `count0` to set `bram_A_addr` and `bram_B_addr` 
+Increase `count0` each cycle
+If `mult_side_len`*`calc_unit_per_bram_group`//`max_len_support` is more than 1,
+pause `count0` for a several cycles after a whole loop of bram_B, and also pause 
+at the beginning. 
+How many cycles? `mult_side_len`*`calc_unit_per_bram_group`//`max_len_support`-1 
+Use `count3` to count pause cycles
+2. Use `count1` to select `bram_A_dout`
+If we read 1 bram A line in each B loop, we do not pause `count0`, and increase 
+`count1` since `count0==2`. And we use `count1` to select `bram_A_dout`.
+If we read more than 1 bram A lines in each B loop, we do pause `count0`, and we
+do not need to select `bram_A_dout` now, since they are all used. So `count1` is 
+useless in this case.
+So, increase `count1` since `count0==2` if read 1 bram_A line per B loop
+otherwise ignore `count1`
+3. `bram_B_dout` do not need to select, it is totally used
+4. Use `count2` to select `bram_r_we`
+Increase `count2` each cycle, since write first result into bram_r.
+`count2` should pause after a loop. Should not pause `count2` together 
+with `count0`, since conv module do not stall when `count0` stall. So stall
+`count2` when finished a loop, and count the stall cycle with `count4`
+5. Use `count5` to set `bram_r_addr`
+Increase `count5` each cycle, since read first result from bram_r.
+`count5` should pause after a loop. Should not pause `count5` together
+with `count0`, since conv module do not stall when `count0` stall. So stall
+`count5` when finished a loop, and count the stall cycle with `count6`
+5. Set `bram_a_addr` with `count0` and `count3`
+When `count0==0` and `count3==0`, set `bram_a_addr` to `pl_weight_start_addr_conv`,
+If `mult_side_len`*`calc_unit_per_bram_group`//`max_len_support` is more than 1,
+stall `count0` and increase `count3`, and increase `bram_a_addr` together, and
+read `bram_a_dout` into `temp` synchronously;
+else if read 1 bram A line per loop, do not need to stall `count0`
+6. Set `bram_b_addr` with `count0`
+When `count0[x:0]==0`, set `bram_b_addr` to `pl_feature_map_addr_conv`, where `x`
+is decided by total bram_b line used. Otherwise, increase `bram_b_addr` each cycle.
+7. Set `temp_w` with `count0`, `count1`, `count3`
+If read 1 bram_a line per loop, use `count1` to select `bram_a_dout`.
+Else, use `count3` to select `temp_w`
+8. Set `temp_f` with `count0`
+Write `bram_b_dout` into `temp_f` each cycle.
+9. Set `conv_in` with `count0`
+Write `temp_w` into `conv_ina`
+Write `temp_f` into `conv_inb`
+10. Set `bram_r_addrb` with `count5` and `count6`
+If `pl_save_type_conv==1`, 
+set `bram_r_addrb` with `pl_output_start_addr_conv` at the beginning, and 
+increase per `n` cycles.
+`n` = ?
+11. Set `bram_r_addra` with `count2` and `count4`
+set `bram_r_addra` with `pl_output_start_addr_conv` at the beginning, and 
+increase per `n` cycles.
+12. Set `bram_r_wea` with `count2`
+Set part of `bram_r_wea` to 1 and others to 0
+13. Set `bram_r_dina` with `count2`
+If `pl_save_type_conv==0`, save conv module output into `bram_r_dina`
+else, add `bram_r_doutb` and save into `bram_r_dina`
+14. Stop 
+After calculation finished, reset `count`, `bram_r_wea` and branch to other states
+When to stop? 
+For example, assume that calc_unit is 4, bram_A line is 16, bram_B line is 16,
+max_len_support is 256. 
+How many A lines? `pl_mat_A_line`
+How many B lines? `pl_mat_B_line`
+How many loops per A line(if use no more than 1 A line per loop)?
+    `max_len_support // mult_side_len // calc_unit`(
+        if `mult_side_len * calc_unit <= max_len_support`
+    )
+How many A lines per loop(if use more than 1 A line per loop)?
+    `mult_side_len * calc_unit // max_len_support`(
+        if `mult_side_len * calc_unit > max_len_support`
+    )
+So the stop cycle count should be:
+`pl_mat_A_line * pl_mat_B_line * loops_per_A_line` if use no more than 1 A line per loop
+`pl_mat_A_line * pl_mat_B_line // A_lines_per_loop` if use more than 1 A line per loop
+Now, we got `count_finish_cycle`, which means we should `count_finish_cycle` 
+times of calc in one convolution

@@ -262,23 +262,23 @@ def gen_code(
 
 
     # # 生成cpu浮点计算代码
-    cpu_float.gen_code(
-        im2col_shape,
-        divided_border,
-        submatrix_size,
-        calc_process,
-        float_mdoel_dir
-    )
+    # cpu_float.gen_code(
+    #     im2col_shape,
+    #     divided_border,
+    #     submatrix_size,
+    #     calc_process,
+    #     float_mdoel_dir
+    # )
 
-    # 生成cpu整数计算代码
-    cpu_int.gen_code(
-        im2col_shape,
-        calculation_graph,
-        divided_border,
-        submatrix_size,
-        calc_process,
-        model_dir
-    )
+    # # 生成cpu整数计算代码
+    # cpu_int.gen_code(
+    #     im2col_shape,
+    #     calculation_graph,
+    #     divided_border,
+    #     submatrix_size,
+    #     calc_process,
+    #     model_dir
+    # )
     
     # 生成conv
     dma_width = 64  # bits

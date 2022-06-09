@@ -59,6 +59,8 @@ def analyse_instr(
 ):
     '''
     Analyse the bit width need of each section in the instructions
+    Attention: for matrix side lengths, since they are all power of 2, 
+    we record them by exponent, and can save bits in this way.
     '''
     # read analyse_result
     resource_analyse_result = analyse_result["resource_analyse_result"]
@@ -95,17 +97,27 @@ def analyse_instr(
     # # # weight data length(in unit of bram row)
     '''
     calculate weight_data_length according to the depth of bram_A
+    (weight_data_length=mat_A_left_side*mat_A_up_side//max_len_support,
+    so it must be power of 2)
     '''
     bram_depth = 512
-    ps_weight_data_length_for_conv = math.ceil(math.log2(max_len_support)) if \
-        (bram_group > 0) else math.ceil(math.log2(bram_depth))
+    ps_weight_data_length_for_conv = math.ceil(math.log2(
+        max_len_support))+1 if (bram_group > 0) else \
+        math.ceil(math.log2(bram_depth))+1
+    ps_weight_data_length_for_conv_exponent = math.ceil(math.log2(math.log2(
+        max_len_support)))+1 if (bram_group > 0) else \
+        math.ceil(math.log2(math.log2(bram_depth)))+1
     
     # # # feature map data length(int unit of bram row)
     '''
     calculate feature_map_data_length according to the depth of bram_B
     '''
-    ps_feature_map_data_length_for_conv = math.ceil(math.log2(max_len_support
-        )) if (bram_group > 0) else math.ceil(math.log2(bram_depth))
+    ps_feature_map_data_length_for_conv = math.ceil(math.log2(
+        max_len_support))+1 if (bram_group > 0) else math.ceil(
+        math.log2(bram_depth))+1
+    ps_feature_map_data_length_for_conv_exponent = math.ceil(math.log2(
+        math.log2(max_len_support)))+1 if (bram_group > 0) else math.ceil(
+        math.log2(math.log2(bram_depth)))+1
 
     # # # instruction begin addr to execute
     '''
@@ -133,8 +145,8 @@ def analyse_instr(
 
     # # # total bit width need by ps conv post_process
     ps_bit_width_need_conv = ps_calculation_type + \
-        ps_weight_data_length_for_conv + \
-        ps_feature_map_data_length_for_conv + \
+        ps_weight_data_length_for_conv_exponent + \
+        ps_feature_map_data_length_for_conv_exponent + \
         ps_instr_begin_addr_for_conv + ps_instr_end_addr_for_conv
 
 
@@ -155,7 +167,7 @@ def analyse_instr(
             input_shape = input_node.output_shape
             hidden_channel = input_shape[1]
             max_hidden_channel = max(max_hidden_channel, hidden_channel)
-    ps_hidden_channel_for_fc = math.ceil(math.log2(max_hidden_channel))
+    ps_hidden_channel_for_fc = math.ceil(math.log2(max_hidden_channel))+1
 
     # # # output_channel
     max_output_channel = 0
@@ -164,7 +176,7 @@ def analyse_instr(
             output_shape = node.output_shape
             output_channel = output_shape[1]
             max_output_channel = max(max_output_channel, output_channel)
-    ps_output_channel_for_fc = math.ceil(math.log2(max_output_channel))
+    ps_output_channel_for_fc = math.ceil(math.log2(max_output_channel))+1
 
     # # # layer mux
     fc_amount = 0
@@ -178,6 +190,7 @@ def analyse_instr(
     ps_bit_width_need_fc = ps_calculation_type + \
         ps_activation_for_fc + ps_hidden_channel_for_fc + \
         ps_output_channel_for_fc + ps_layer_mux_for_fc
+    
     
     # # ps bit width need
     ps_bit_width_need = math.ceil(
@@ -206,7 +219,9 @@ def analyse_instr(
                 max_multiply_side_length = max(
                     max_multiply_side_length, multiply_side_length)
     pl_multiply_side_length_for_conv = math.ceil(
-        math.log2(max_multiply_side_length))
+        math.log2(max_multiply_side_length))+1
+    pl_multiply_side_length_for_conv_exponent = math.ceil(math.log2(
+        math.log2(max_multiply_side_length)))+1
 
     # # # A left side length
     max_A_left_side_length = 0
@@ -219,7 +234,9 @@ def analyse_instr(
                 max_A_left_side_length = max(
                     max_A_left_side_length, A_left_side_length)
     pl_A_left_side_length_for_conv = math.ceil(
-        math.log2(max_A_left_side_length))
+        math.log2(max_A_left_side_length))+1
+    pl_A_left_side_length_for_conv_exponent = math.ceil(math.log2(
+        math.log2(max_A_left_side_length)))+1
     
     # # # B up side length
     max_B_up_side_length = 0
@@ -232,7 +249,9 @@ def analyse_instr(
                 max_B_up_side_length = max(
                     max_B_up_side_length, B_up_side_length)
     pl_B_up_side_length_for_conv = math.ceil(
-        math.log2(max_B_up_side_length))
+        math.log2(max_B_up_side_length))+1
+    pl_B_up_side_length_for_conv_exponent = math.ceil(math.log2(
+        math.log2(max_B_up_side_length)))+1
     
     # # # weight buffer read start line
     pl_weight_buffer_read_start_line_for_conv = math.ceil(math.log2(
@@ -261,13 +280,14 @@ def analyse_instr(
 
     # # # pl bit width need by conv
     pl_bit_width_need_conv = pl_calculation_type + \
-        pl_multiply_side_length_for_conv + \
-        pl_A_left_side_length_for_conv + pl_B_up_side_length_for_conv + \
+        pl_multiply_side_length_for_conv_exponent + \
+        pl_A_left_side_length_for_conv_exponent + \
+        pl_B_up_side_length_for_conv_exponent + \
         pl_weight_buffer_read_start_line_for_conv + \
         pl_feature_map_buffer_read_start_line_for_conv + \
         pl_output_buffer_store_start_line_for_conv + \
         pl_store_or_accumulate_for_conv + pl_layer_mux_for_conv
-    
+
 
     # # instruction field for post process
     # # # side len
@@ -281,7 +301,10 @@ def analyse_instr(
                 max_result_block_up_side_length = max(
                     max_result_block_up_side_length, 
                     result_block_up_side_length)
-    pl_side_len_for_pp = math.ceil(math.log2(max_result_block_up_side_length))
+    pl_side_len_for_pp = math.ceil(math.log2(
+        max_result_block_up_side_length))+1
+    pl_side_len_for_pp_exponent = math.ceil(math.log2(math.log2(
+        max_result_block_up_side_length)))+1
     
     # # # start channel
     max_channel = 0
@@ -300,13 +323,14 @@ def analyse_instr(
         depth_c_need_per_bram_col))
     
     # # # process lines
-    pl_process_lines_for_pp = math.ceil(math.log2(depth_c_need_per_bram_col))
+    pl_process_lines_for_pp = math.ceil(math.log2(depth_c_need_per_bram_col))+1
     
     # # # activation
     pl_activation_for_pp = 4
 
     # # # pl bit width need by post process
-    pl_bit_width_need_pp = pl_calculation_type + pl_side_len_for_pp + \
+    pl_bit_width_need_pp = pl_calculation_type + \
+        pl_side_len_for_pp_exponent + \
         pl_start_channel_for_pp + pl_layer_mux_for_pp + \
         pl_output_buffer_read_start_line_for_pp + pl_process_lines_for_pp + \
         pl_activation_for_pp
@@ -314,7 +338,8 @@ def analyse_instr(
 
     # # instruction field for write back
     # # # write back rows
-    pl_write_back_rows_for_wb = math.ceil(math.log2(depth_c_need_per_bram_col))
+    pl_write_back_rows_for_wb = math.ceil(math.log2(
+        depth_c_need_per_bram_col))+1
     
     # # # pl bit width need by write back
     pl_bit_width_need_wb = pl_calculation_type + pl_write_back_rows_for_wb
@@ -326,13 +351,19 @@ def analyse_instr(
         pl_bit_width_need_wb
     ) / 32) * 32
     
+    
 
     # return result
+    # marked by 'e' means the variable is recorded by exponent
     return {
         "ps_calculation_type": pl_calculation_type,
-        "ps_weight_data_length_for_conv": ps_weight_data_length_for_conv,
+        "ps_weight_data_length_for_conv": ps_weight_data_length_for_conv, #e
+        "ps_weight_data_length_for_conv_exponent": 
+            ps_weight_data_length_for_conv_exponent,
         "ps_feature_map_data_length_for_conv": 
-            ps_feature_map_data_length_for_conv,
+            ps_feature_map_data_length_for_conv, #e
+        "ps_feature_map_data_length_for_conv_exponent":
+            ps_feature_map_data_length_for_conv_exponent,
         "ps_instr_begin_addr_for_conv": ps_instr_begin_addr_for_conv,
         "ps_instr_end_addr_for_conv": ps_instr_end_addr_for_conv,
         "ps_bit_width_need_for_conv": ps_bit_width_need_conv,
@@ -343,9 +374,15 @@ def analyse_instr(
         "ps_bit_width_need_for_fc": ps_bit_width_need_fc,
         "ps_bit_width_need": ps_bit_width_need,
         "pl_calculation_type": pl_calculation_type,
-        "pl_mult_side_length_for_conv": pl_multiply_side_length_for_conv,
-        "pl_A_left_side_length_for_conv": pl_A_left_side_length_for_conv,
-        "pl_B_up_side_length_for_conv": pl_B_up_side_length_for_conv,
+        "pl_mult_side_length_for_conv": pl_multiply_side_length_for_conv, #e
+        "pl_mult_side_length_for_conv_exponent": 
+            pl_multiply_side_length_for_conv_exponent,
+        "pl_A_left_side_length_for_conv": pl_A_left_side_length_for_conv, #e
+        "pl_A_left_side_length_for_conv_exponent": 
+            pl_A_left_side_length_for_conv_exponent,
+        "pl_B_up_side_length_for_conv": pl_B_up_side_length_for_conv, #e
+        "pl_B_up_side_length_for_conv_exponent": 
+            pl_B_up_side_length_for_conv_exponent,
         "pl_weight_buffer_read_start_line_for_conv": 
             pl_weight_buffer_read_start_line_for_conv,
         "pl_feature_map_buffer_read_start_line_for_conv":
@@ -355,7 +392,8 @@ def analyse_instr(
         "pl_store_or_accumulate_for_conv": pl_store_or_accumulate_for_conv,
         "pl_layer_mux_for_conv": pl_layer_mux_for_conv,
         "pl_bit_width_need_for_conv": pl_bit_width_need_conv,
-        "pl_side_length_for_pp": pl_side_len_for_pp,
+        "pl_side_length_for_pp": pl_side_len_for_pp, #e
+        "pl_side_length_for_pp_exponent": pl_side_len_for_pp_exponent,
         "pl_start_channel_for_pp": pl_start_channel_for_pp,
         "pl_layer_mux_for_pp": pl_layer_mux_for_pp,
         "pl_output_buffer_read_start_line_for_pp": 

@@ -7,10 +7,10 @@
 void read_data(unsigned char * train_images, unsigned char * train_labels, 
                unsigned char * test_images, unsigned char * test_labels)
 {
-    FILE * f_tri = fopen("../mnist/train_images.bin", "rb");
-    FILE * f_trl = fopen("../mnist/train_labels.bin", "rb");
-    FILE * f_tei = fopen("../mnist/test_images.bin", "rb");
-    FILE * f_tel = fopen("../mnist/test_labels.bin", "rb");
+    FILE * f_tri = fopen("../../../../../dataset/mnist/train_images.bin", "rb");
+    FILE * f_trl = fopen("../../../../../dataset/mnist/train_labels.bin", "rb");
+    FILE * f_tei = fopen("../../../../../dataset/mnist/test_images.bin", "rb");
+    FILE * f_tel = fopen("../../../../../dataset/mnist/test_labels.bin", "rb");
     if(fread(train_images, 1, TRAIN_NUM*HEIGHT*WIDTH, f_tri) != TRAIN_NUM*HEIGHT*WIDTH) {
         printf("fread size error at line %d\n", __LINE__);
     }

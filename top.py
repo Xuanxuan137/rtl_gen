@@ -1,9 +1,9 @@
 
 
 
-from distutils.util import strtobool
 from ftplib import MAXLINE
 import math
+from tkinter.tix import MAX
 
 
 def decimal_to_bin(value, width):
@@ -342,8 +342,12 @@ def gen_top(
     ps_calc_type_width = INSTR_ANALYSE_RESULT["ps_calculation_type"]
     ps_weight_len_width = INSTR_ANALYSE_RESULT[
         "ps_weight_data_length_for_conv"]
+    ps_weight_len_width_exponent = INSTR_ANALYSE_RESULT[
+        "ps_weight_data_length_for_conv_exponent"]
     ps_feature_map_len_width = INSTR_ANALYSE_RESULT[
         "ps_feature_map_data_length_for_conv"]
+    ps_feature_map_len_width_exponent = INSTR_ANALYSE_RESULT[
+        "ps_feature_map_data_length_for_conv_exponent"]
     ps_instr_begin_addr_width = INSTR_ANALYSE_RESULT[
         "ps_instr_begin_addr_for_conv"]
     ps_instr_end_addr_width = INSTR_ANALYSE_RESULT[
@@ -366,10 +370,16 @@ def gen_top(
     # signals for convolution instruction
     pl_mult_side_len_conv_width = INSTR_ANALYSE_RESULT[
         "pl_mult_side_length_for_conv"]
+    pl_mult_side_len_conv_width_exponent = INSTR_ANALYSE_RESULT[
+        "pl_mult_side_length_for_conv_exponent"]
     pl_A_left_side_len_conv_width = INSTR_ANALYSE_RESULT[
         "pl_A_left_side_length_for_conv"]
+    pl_A_left_side_len_conv_width_exponent = INSTR_ANALYSE_RESULT[
+        "pl_A_left_side_length_for_conv_exponent"]
     pl_B_up_side_len_conv_width = INSTR_ANALYSE_RESULT[
         "pl_B_up_side_length_for_conv"]
+    pl_B_up_side_len_conv_width_exponent = INSTR_ANALYSE_RESULT[
+        "pl_B_up_side_length_for_conv_exponent"]
     pl_weight_start_addr_conv_width = INSTR_ANALYSE_RESULT[
         "pl_weight_buffer_read_start_line_for_conv"]
     pl_feature_map_start_addr_conv_width = INSTR_ANALYSE_RESULT[
@@ -385,6 +395,18 @@ def gen_top(
         pl_A_left_side_len_conv_width-1)
     code += indent + "reg [%d:0] pl_B_up_side_len_conv;\n"%(
         pl_B_up_side_len_conv_width-1)
+    code += indent + "wire [%d:0] pl_mat_A_space;\n"%(  # exponent
+        max(pl_mult_side_len_conv_width, pl_A_left_side_len_conv_width)+1-1)
+    code += indent + "assign pl_mat_A_space = pl_mult_side_len_conv + " \
+        "pl_A_left_side_len_conv;\n"
+    code += indent + "wire [%d:0] pl_mat_B_space;\n"%(  # exponent
+        max(pl_B_up_side_len_conv_width, pl_mult_side_len_conv_width)+1-1)
+    code += indent + "assign pl_mat_B_space = pl_B_up_side_len_conv + " \
+        "pl_mult_side_len_conv;\n"
+    code += indent + "reg [%d:0] pl_mat_A_line;\n"%(    # exponent
+        max(pl_mult_side_len_conv_width, pl_A_left_side_len_conv_width)+1-1)
+    code += indent + "reg [%d:0] pl_mat_B_line;\n"%(    # exponent
+        max(pl_B_up_side_len_conv_width, pl_mult_side_len_conv_width)+1-1)
     code += indent + "reg [%d:0] pl_weight_start_addr_conv;\n"%(
         pl_weight_start_addr_conv_width-1)
     code += indent + "reg [%d:0] pl_feature_map_start_addr_conv;\n"%(
@@ -396,6 +418,8 @@ def gen_top(
     code += indent + "reg [%d:0] pl_mux_conv;\n"%(pl_layer_mux_conv_width-1)
     # signals for post_process instructions
     pl_side_len_pp_width = INSTR_ANALYSE_RESULT["pl_side_length_for_pp"]
+    pl_side_len_pp_width_exponent = INSTR_ANALYSE_RESULT[
+        "pl_side_length_for_pp_exponent"]
     pl_start_channel_pp_width = INSTR_ANALYSE_RESULT["pl_start_channel_for_pp"]
     pl_layer_mux_pp_width = INSTR_ANALYSE_RESULT["pl_layer_mux_for_pp"]
     pl_output_start_addr_pp_width = INSTR_ANALYSE_RESULT[
@@ -449,11 +473,30 @@ def gen_top(
             decimal_to_one_hot_binary(n, state_bit_width))
     code += indent + "reg [7:0] internal_state;\n"
     code += indent + "reg [7:0] dma_state;\n"
-    code += indent + "reg [15:0] count0;\n"
-    code += indent + "reg [15:0] count1;\n"
-    code += indent + "reg [15:0] count2;\n"
-    code += indent + "reg [15:0] count3;\n"
-    code += indent + "reg [15:0] count_boundary;\n"
+    max_ports = max(CONV_OUTPUT_PORTS)
+    count_width = math.ceil(math.log2(max_ports**2))+2
+    code += indent + "reg [%d:0] count0;\n"%(count_width-1)
+    code += indent + "reg [%d:0] count1;\n"%(count_width-1)
+    code += indent + "reg [%d:0] count2;\n"%(count_width-1)
+    code += indent + "reg [%d:0] count3;\n"%(count_width-1)
+    code += indent + "reg [%d:0] count4;\n"%(count_width-1)
+    code += indent + "reg [%d:0] count5;\n"%(count_width-1)
+    code += indent + "reg [%d:0] count6;\n"%(count_width-1)
+    code += indent + "reg [%d:0] count_finish_cycle;\n"%(count_width-1)
+    code += indent + "reg [%d:0] count_boundary;\n"%(count_width-1)
+    code += indent + "reg more_than_1_A_line_per_loop;\n"
+    code += indent + "reg [%d:0] loops_per_A_line;\n"%(
+        math.ceil(math.log2(MAX_LEN_SUPPORT))+1-1)
+    code += indent + "reg [%d:0] A_lines_per_loop;\n"%(
+        pl_mult_side_len_conv_width_exponent + 
+        math.ceil(math.log2(CALC_UNIT_PER_BRAM_GROUP))+1)
+    code += indent + "wire [%d:0] count_finish_cycle_exponent;\n"%(
+        math.ceil(math.log2(count_width))+1-1)
+    code += indent + "assign count_finish_cycle_exponent = \n" \
+        "%s\t(more_than_1_A_line_per_loop == 0) ? \n" \
+        "%s\t(pl_mat_A_line + pl_mat_B_line + loops_per_A_line) : \n" \
+        "%s\t(pl_mat_A_line + pl_mat_B_line - A_lines_per_loop);\n"%(
+            indent, indent, indent)
     # since block_count0 is used to index weight buffer column, calc it with
     # WEIGHT_BUF_COL
     block_count0_width = math.ceil(math.log2(WEIGHT_BUF_COL))
@@ -495,6 +538,8 @@ def gen_top(
     code += indent + "pl_mult_side_len_conv = 0;\n"
     code += indent + "pl_A_left_side_len_conv = 0;\n"
     code += indent + "pl_B_up_side_len_conv = 0;\n"
+    code += indent + "pl_mat_A_line = 0;\n"
+    code += indent + "pl_mat_B_line = 0;\n"
     code += indent + "pl_weight_start_addr_conv = 0;\n"
     code += indent + "pl_feature_map_start_addr_conv = 0;\n"
     code += indent + "pl_output_start_addr_conv = 0;\n"
@@ -518,7 +563,14 @@ def gen_top(
     code += indent + "count1 = 0;\n"
     code += indent + "count2 = 0;\n"
     code += indent + "count3 = 0;\n"
+    code += indent + "count4 = 0;\n"
+    code += indent + "count5 = 0;\n"
+    code += indent + "count6 = 0;\n"
+    code += indent + "count_finish_cycle = 0;\n"
     code += indent + "count_boundary = 0;\n"
+    code += indent + "more_than_1_A_line_per_loop = 0;\n"
+    code += indent + "loops_per_A_line = 0;\n"
+    code += indent + "A_lines_per_loop = 0;\n"
     code += indent + "block_count0 = 0;\n"
     code += indent + "block_count1 = 0;\n"
     code += indent + "block_count2 = 0;\n"
@@ -611,16 +663,26 @@ def gen_top(
     code += indent + "bram_we <= 4'b0000;\n"
     ps_conv_instr_field_list = [
         ("ps_calc_type", ps_calc_type_width),
-        ("ps_weight_len", ps_weight_len_width),
-        ("ps_feature_map_len", ps_feature_map_len_width),
+        ("ps_weight_len", ps_weight_len_width_exponent, ps_weight_len_width),
+        ("ps_feature_map_len", ps_feature_map_len_width_exponent, 
+            ps_feature_map_len_width),
         ("ps_instr_start_addr", ps_instr_begin_addr_width),
         ("ps_instr_end_addr", ps_instr_end_addr_width),
     ]
+    ps_conv_instr_field_exponent_list = [
+        "ps_weight_len",
+        "ps_feature_map_len",
+    ]
     len_accumulate = 0
     for pair in ps_conv_instr_field_list:
-        code += indent + "%s <= ps_instruction[%d:%d];\n"%(pair[0],
-            ps_instr_width-1-len_accumulate, 
-            ps_instr_width-len_accumulate-pair[1])
+        if(pair[0] in ps_conv_instr_field_exponent_list):
+            code += indent + "%s <= %d'b1 << ps_instruction[%d:%d];\n"%(
+                pair[0], pair[2], ps_instr_width-1-len_accumulate, 
+                ps_instr_width-len_accumulate-pair[1])
+        else:
+            code += indent + "%s <= ps_instruction[%d:%d];\n"%(pair[0],
+                ps_instr_width-1-len_accumulate, 
+                ps_instr_width-len_accumulate-pair[1])
         len_accumulate += pair[1]
     code += indent + "internal_state <= %d;\n"%(start_internal_state + 1)
     indent = "\t\t\t\t\t"
@@ -727,33 +789,80 @@ def gen_top(
     code += indent + "0: begin\n"
     indent = "\t\t\t\t\t\t"
     pl_conv_instr_field_list = [
-        ("pl_mult_side_len_conv", pl_mult_side_len_conv_width),
-        ("pl_A_left_side_len_conv", pl_A_left_side_len_conv_width),
-        ("pl_B_up_side_len_conv", pl_B_up_side_len_conv_width),
+        ("pl_mult_side_len_conv", pl_mult_side_len_conv_width_exponent,
+            pl_mult_side_len_conv_width),
+        ("pl_A_left_side_len_conv", pl_A_left_side_len_conv_width_exponent,
+            pl_A_left_side_len_conv_width),
+        ("pl_B_up_side_len_conv", pl_B_up_side_len_conv_width_exponent,
+            pl_B_up_side_len_conv_width),
         ("pl_weight_start_addr_conv", pl_weight_start_addr_conv_width),
         ("pl_feature_map_start_addr_conv", pl_feature_map_start_addr_conv_width),
         ("pl_output_start_addr_conv", pl_output_start_addr_conv_width),
         ("pl_save_type_conv", pl_save_type_conv_width),
         ("pl_mux_conv", pl_layer_mux_conv_width),
     ]
+    pl_conv_instr_field_exponent_list = [
+        "pl_mult_side_len_conv",
+        "pl_A_left_side_len_conv",
+        "pl_B_up_side_len_conv",
+    ]
     len_accumulate = pl_calc_type_width
     for pair in pl_conv_instr_field_list:
-        code += indent + "%s <= pl_instruction[%d:%d];\n"%(pair[0], 
-            pl_instr_width - 1 - len_accumulate, 
+        if(pair[0] in pl_conv_instr_field_exponent_list):
+            code += indent + "%s <= %d'b1 << pl_instruction[%d:%d];\n"%(
+                pair[0], pair[2], pl_instr_width - 1 - len_accumulate, 
             pl_instr_width - len_accumulate - pair[1])
+        else:
+            code += indent + "%s <= pl_instruction[%d:%d];\n"%(pair[0], 
+                pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
         len_accumulate += pair[1]
     code += indent + "internal_state <= 1;\n"
     indent = "\t\t\t\t\t"
     code += indent + "end\n"
-    # CONVOLUTION: 1 -> branch by mult side len
+    # CONVOLUTION: 1 -> calculate some arguments
     code += indent + "1: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "pl_mat_A_line <= pl_mat_A_space - %d;\n"%(
+        math.ceil(math.log2(MAX_LEN_SUPPORT)))
+    code += indent + "pl_mat_B_line <= pl_mat_B_space - %d;\n"%(
+        math.ceil(math.log2(MAX_LEN_SUPPORT)))
+    code += indent + "if(pl_mult_side_len_conv + %d <= %d) begin\n"%(
+        math.ceil(math.log2(CALC_UNIT_PER_BRAM_GROUP)), 
+        math.ceil(math.log2(MAX_LEN_SUPPORT)))
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "more_than_1_A_line_per_loop <= 0;\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "else begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "more_than_1_A_line_per_loop <= 1;\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "loops_per_A_line <= %d - pl_mult_side_len_conv" \
+        " - %d;\n"%(math.ceil(math.log2(MAX_LEN_SUPPORT)), 
+        math.ceil(math.log2(CALC_UNIT_PER_BRAM_GROUP)))
+    code += indent + "A_lines_per_loop <= pl_mult_side_len_conv + %d - %d;\n"%(
+        math.ceil(math.log2(CALC_UNIT_PER_BRAM_GROUP)),
+        math.ceil(math.log2(MAX_LEN_SUPPORT)))
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # CONVOLUTION: 2 -> calculate some arguments
+    code += indent + "2: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "count_finish_cycle <= %d'b1 << " \
+        "count_finish_cycle_exponent;\n"%(count_width)
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # CONVOLUTION: 3 -> branch by mult side len
+    code += indent + "3: begin\n"
     indent = "\t\t\t\t\t\t"
     for unit in range(CALC_UNIT_PER_BRAM_GROUP):
         code += indent + "conv_mux_%d <= pl_mux_conv;\n"%(unit)
     code += indent + "case(pl_mult_side_len_conv)\n"
     indent = "\t\t\t\t\t\t\t"
     for n, port in enumerate(CONV_OUTPUT_PORTS):
-        code += indent + "%d: internal_state <= %d;\n"%(port, n+2)
+        code += indent + "%d: internal_state <= %d;\n"%(port, n+4)
     code += indent + "default: begin\n"
     indent = "\t"*8
     code += indent + "$display(\"Unknown mult side len in CONVOLUTION\");\n"
@@ -764,7 +873,7 @@ def gen_top(
     code += indent + "endcase\n"
     indent = "\t\t\t\t\t"
     code += indent + "end\n"
-    # CONVOLUTION: 2-x -> convolution with mult side len=n
+    # CONVOLUTION: 4-x -> convolution with mult side len=n
     for n, port in enumerate(CONV_OUTPUT_PORTS):
         '''
         In this part, we need to calculate convolution by mult_side_len.
@@ -775,7 +884,7 @@ def gen_top(
             lines of bram_A to fill all calc units, and we have to read bram_A
             more than once in each bram_B cycle
         '''
-        code += indent + "%d: begin\n"%(n+2)
+        code += indent + "%d: begin\n"%(n+4)
         indent = "\t\t\t\t\t\t"
         # TODO
 
