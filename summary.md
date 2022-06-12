@@ -396,3 +396,23 @@ So the stop cycle count should be:
 `pl_mat_A_line * pl_mat_B_line // A_lines_per_loop` if use more than 1 A line per loop
 Now, we got `count_finish_cycle`, which means we should `count_finish_cycle` 
 times of calc in one convolution
+
+
+
+# Attention
+About write_back, if calculation unit is more than 1, such as 2, then we will do 
+post process in two parallel modules, and the results return in two streams. 
+The result streams will store into bram_r in two groups of bram_r cols, and so,
+when we write back the results, the results are not contiguous.
+For example, the results in bram_r may look like the below:
+r00 r01 r10 r11 
+r02 r03 r12 r13
+r04 r05 r14 r15
+r06 r07 r16 r17
+r20 r21 r30 r31
+...     ...
+In order to save the dma startup time, we would like to transfer all post processed
+results in one transfer, and in this way, we cannot distinguish the mult_side_len, 
+and will not know when to change bram_r_addr to transfer in matrix order, so we 
+have to transfer the data in bram_r order, and it does not match the matrix order.
+So, we have to convert it back to matrix order in C program.

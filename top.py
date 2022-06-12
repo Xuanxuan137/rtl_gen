@@ -959,7 +959,9 @@ def gen_top(
         cycles_increase_r_addr_once = OUTPUT_BUF_COL * 2 // results_per_cycles
         if(not more_than_1_A_line_per_loop):
             # finish convolution
-            code += indent + "if(count == %d) begin\n"      # TODO
+            conv_delay_cycles = 2 + math.ceil(math.log2(port))
+            code += indent + "if(count == count_finish_cycle + %d) begin\n"%(
+                conv_delay_cycles+6)
             indent = "\t\t\t\t\t\t\t"
             code += indent + "cycle <= 0;\n"
             code += indent + "count <= 0;\n"
@@ -977,7 +979,6 @@ def gen_top(
             indent = "\t\t\t\t\t\t"
             code += indent + "end\n"
             # control counters
-            conv_delay_cycles = 2 + math.ceil(math.log2(port))
             code += indent + "else begin\n"
             indent = "\t\t\t\t\t\t\t"
             code += indent + "count <= count + 1;\n"
@@ -1364,7 +1365,6 @@ def gen_top(
             code += indent + "end\n"
             code += indent + "if(pl_save_type_conv == 1) begin\n"
             indent = "\t"*8
-            # TODO
             if(cycles_increase_r_addr_once <= OUTPUT_BUF_COL):
                 for i in range(CALC_UNIT_PER_BRAM_GROUP):
                     for j in range(OUTPUT_BUF_COL//cycles_increase_r_addr_once
@@ -1483,6 +1483,7 @@ def gen_top(
             '''
             Use more than 1 A line per loop. Support it later
             '''
+            # TODO
             pass
         
         indent = "\t\t\t\t\t"
@@ -1494,6 +1495,180 @@ def gen_top(
     # POST_PROCESS
     code += indent + "POST_PROCESS: begin\n"
     indent = "\t\t\t\t"
+    code += indent + "case(internal_state)\n"
+    indent = "\t\t\t\t\t"
+    # POST_PROCESS: 0 -> decode
+    code += indent + "0: begin\n"
+    indent = "\t\t\t\t\t\t"
+    pl_pp_instr_field_list = [
+        ("pl_side_len_pp", pl_side_len_pp_width_exponent,
+            pl_side_len_pp_width, "pl_side_len_pp_exponent"),
+        ("pl_start_channel_pp", pl_start_channel_pp_width),
+        ("pl_mux_pp", pl_layer_mux_pp_width),
+        ("pl_output_start_addr_pp", pl_output_start_addr_pp_width),
+        ("pl_process_lines_pp", pl_process_lines_pp_width),
+        ("pl_activation_pp", pl_activation_pp_width),
+    ]
+    pl_pp_instr_field_exponent_list = [
+        "pl_side_len_pp"
+    ]
+    len_accumulate = pl_calc_type_width
+    for pair in pl_pp_instr_field_list:
+        if(pair[0] in pl_pp_instr_field_exponent_list):
+            code += indent + "%s <= %d'b1 << pl_instruction[%d:%d];\n"%(
+                pair[0], pair[2], pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
+            code += indent + "%s <= pl_instruction[%d:%d];\n"%(
+                pair[3], pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
+        else:
+            code += indent + "%s <= pl_instruction[%d:%d];\n"%(pair[0], 
+                pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
+        len_accumulate += pair[1]
+    code += indent + "internal_state <= 1;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # POST_PROCESS: 0 -> calculate count boundary
+    code += indent + "1: begin\n"
+    indent = "\t\t\t\t\t\t"
+    for i in range(CALC_UNIT_PER_BRAM_GROUP):
+        code += indent + "pp_mux_%d <= pl_mux_pp;\n"%(i)
+        code += indent + "pp_activation_%d <= pl_activation_pp;\n"%(i)
+    code += indent + "count_boundary <= pl_process_lines_pp;\n"
+    code += indent + "internal_state <= 2;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # POST_PROCESS: 2 -> calculate
+    code += indent + "2: begin\n"
+    indent = "\t\t\t\t\t\t"
+    # finish process
+    code += indent + "if(count == count_boundary + 9) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "count <= 0;\n"
+    code += indent + "count0 <= 0;\n"
+    code += indent + "count1 <= 0;\n"
+    code += indent + "count2 <= 0;\n"
+    for i in range(OUTPUT_BUF_COL):
+        code += indent + "bram_r_wea[%d] <= 0;\n"%(i)
+    code += indent + "state <= PL_INSTR_READ;\n"
+    code += indent + "internal_state <= 0;\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # count control
+    code += indent + "else begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "count <= count + 1;\n"
+    code += indent + "count0 <= count0 + 1;\n"
+    code += indent + "if(count >= 2) begin\n"
+    indent = "\t"*8
+    code += indent + "count1 <= count1 + 1;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "if(count >= 9) begin\n"
+    indent = "\t"*8
+    code += indent + "count2 <= count2 + 1;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # set bram_r_addrb
+    code += indent + "if(count == 0) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    for i in range(OUTPUT_BUF_COL):
+        code += indent + "bram_r_addrb[%d] <= pl_output_start_addr_pp;\n"%(i)
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "else if(count > 0 && count < count_boundary) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    for i in range(OUTPUT_BUF_COL):
+        code += indent + "bram_r_addrb[%d] <= bram_r_addrb[%d] + 1;\n"%(i, i)
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # write data into ppin
+    code += indent + "if(count >= 2 && count <= count_boundary+1) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    for i in range(CALC_UNIT_PER_BRAM_GROUP):
+        output_buf_col_per_calc_unit = OUTPUT_BUF_COL // \
+            CALC_UNIT_PER_BRAM_GROUP
+        for j in range(output_buf_col_per_calc_unit):
+            code += indent + "pp_din_%d[%d:%d] <= bram_r_doutb[%d];\n"%(i, 
+                output_buf_col_per_calc_unit*64-1-j*64, 
+                output_buf_col_per_calc_unit*64-j*64-64,
+                i*output_buf_col_per_calc_unit+j)
+    indent= "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # set pp_channel
+    code += indent + "if(count >= 2 && count <= count_boundary+1) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "case(pl_side_len_pp)\n"
+    indent = "\t"*8
+    for port in CONV_OUTPUT_PORTS:
+        for i in range(CALC_UNIT_PER_BRAM_GROUP):
+            code += indent + "%d: begin\n"%(port)
+            indent = "\t"*9
+            code += indent + "pp_channel_%d <= pl_start_channel_pp + "%(i)
+            if(i > 0):
+                code += "%d + "%(i)
+            shift_bit = math.ceil(math.log2(port // (OUTPUT_BUF_COL // 
+                CALC_UNIT_PER_BRAM_GROUP) // 2))
+            if(shift_bit > 0):
+                code += "(count1 >> %d)"%(shift_bit)
+            else:
+                code += "count1"
+            code += ";\n"
+            indent = "\t"*8
+            code += indent + "end\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "endcase\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # write back to bram_r, use only 1/4 bram_r cols
+    # set bram_r_addra
+    code += indent + "if(count == 9) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    for i in range(OUTPUT_BUF_COL // 4):
+        code += indent + "bram_r_addra[%d] <= pl_output_start_addr_pp;\n"%(i)
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "else if(count > 9 && count <= count_boundary+8) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    for i in range(OUTPUT_BUF_COL // 4):
+        code += indent + "bram_r_addra[%d] <= bram_r_addra[%d] + 1;\n"%(i, i)
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # set bram_r_dina
+    code += indent + "if(count >= 9 && count <= count_boundary+8) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    for i in range(CALC_UNIT_PER_BRAM_GROUP):
+        for j in range(OUTPUT_BUF_COL//CALC_UNIT_PER_BRAM_GROUP//4):
+            output_buf_col_per_calc_unit = OUTPUT_BUF_COL // \
+                CALC_UNIT_PER_BRAM_GROUP
+            code += indent + "bram_r_dina[%d] <= pp_dout_%d[%d:%d];\n"%(
+                i*OUTPUT_BUF_COL//4+j, i, output_buf_col_per_calc_unit*16-1-
+                j*64, output_buf_col_per_calc_unit*16-j*64-64)
+            code += indent + "bram_r_wea[%d] <= 1;\n"%(i*OUTPUT_BUF_COL//4+j)
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "else begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    for i in range(CALC_UNIT_PER_BRAM_GROUP):
+        for j in range(OUTPUT_BUF_COL//CALC_UNIT_PER_BRAM_GROUP//4):
+            code += indent + "bram_r_wea[%d] <= 0;\n"%(i*OUTPUT_BUF_COL//4+j)
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t"
+    code += indent + "endcase\n"
+    indent = "\t\t\t"
+    code += indent + "end\n"
+    # WRITE_BACK
+    '''
+    
+    '''
+    code += indent + "WRITE_BACK: begin\n"
+    # TODO
 
     indent = "\t\t\t"
     code += indent + "end\n"
