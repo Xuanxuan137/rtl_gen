@@ -1,12 +1,15 @@
 
 
 
+from calendar import c
 from ftplib import MAXLINE
 from itertools import count, cycle
 import math
 from tkinter.tix import MAX
 from unicodedata import decimal
 from unittest.util import _count_diff_hashable
+
+from numpy import block
 
 
 def decimal_to_bin(value, width):
@@ -542,6 +545,9 @@ def gen_top(
     # block_count4 is used to index output buffer column in fc
     block_count4_width = math.ceil(math.log2(OUTPUT_BUF_COL))
     code += indent + "reg [%d:0] block_count4;\n"%(block_count4_width-1)
+    # block_count5 is used together with block_count2
+    block_count5_width = math.ceil(math.log2(OUTPUT_BUF_COL//4))
+    code += indent + "reg [%d:0] block_count5;\n"%(block_count5_width-1)
     for port in CONV_OUTPUT_PORTS:
         for unit in range(CALC_UNIT_PER_BRAM_GROUP):
             code += indent + "reg [%d:0] temp_w_%d_%d;\n"%(
@@ -614,6 +620,7 @@ def gen_top(
     code += indent + "block_count2 = 0;\n"
     code += indent + "block_count3 = 0;\n"
     code += indent + "block_count4 = 0;\n"
+    code += indent + "block_count5 = 0;\n"
     for port in CONV_OUTPUT_PORTS:
         for unit in range(CALC_UNIT_PER_BRAM_GROUP):
             code += indent + "temp_w_%d_%d = 0;\n"%(port, unit)
@@ -1664,14 +1671,379 @@ def gen_top(
     indent = "\t\t\t"
     code += indent + "end\n"
     # WRITE_BACK
-    '''
-    
-    '''
     code += indent + "WRITE_BACK: begin\n"
-    # TODO
-
+    indent = "\t\t\t\t"
+    code += indent + "case(internal_state)\n"
+    indent = "\t\t\t\t\t"
+    # WRITE_BACK: 0 -> decode
+    code += indent + "0: begin\n"
+    indent = "\t\t\t\t\t\t"
+    pl_wb_instr_field_list = [
+        ("pl_write_len_wb", pl_write_len_wb_width),
+    ]
+    pl_wb_instr_field_exponent_list = [
+    ]
+    len_accumulate = pl_calc_type_width
+    for pair in pl_wb_instr_field_list:
+        if(pair[0] in pl_wb_instr_field_exponent_list):
+            code += indent + "%s <= %d'b1 << pl_instruction[%d:%d];\n"%(
+                pair[0], pair[2], pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
+            code += indent + "%s <= pl_instruction[%d:%d];\n"%(
+                pair[3], pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
+        else:
+            code += indent + "%s <= pl_instruction[%d:%d];\n"%(pair[0], 
+                pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
+        len_accumulate += pair[1]
+    code += indent + "internal_state <= 1;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # WRITE_BACK: 1 -> write data
+    code += indent + "1: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "case(dma_state)\n"
+    indent = "\t\t\t\t\t\t\t"
+    # WRITE_BACK: 1: 0 -> cycle 1
+    code += indent + "0: begin\n"
+    indent = "\t"*8
+    code += indent + "bram_r_addrb[block_count2] <= count;\n"
+    code += indent + "block_count2 <= block_count2 + 1;\n"
+    code += indent + "block_count5 <= block_count2 - 1;\n"
+    code += indent + "dma_state <= 1;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # WRITE_BACK: 1: 1 -> cycle 2
+    code += indent + "1: begin\n"
+    indent = "\t"*8
+    code += indent + "bram_r_addrb[block_count2] <= count;\n"
+    code += indent + "block_count2 <= block_count2 + 1;\n"
+    code += indent + "block_count5 <= block_count2 - 1;\n"
+    code += indent + "if(block_count2 == %d'b%s) begin\n"%(block_count2_width, 
+        decimal_to_bin(2**block_count2_width-1, block_count2_width))
+    indent = "\t"*9
+    code += indent + "count <= count + 1;\n"
+    indent = "\t"*8
+    code += indent + "end\n"
+    code += indent + "dma_state <= 2;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # WRITE_BACK: 1: 2 -> set first tdata
+    code += indent + "2: begin\n"
+    indent = "\t"*8
+    code += indent + "dma_w0_tdata <= {\n"
+    indent = "\t"*9
+    for i in range(8):
+        code += indent + "bram_r_doutb[block_count5][%d:%d],\n"%(i*8+7, i*8)
+    code = code[:-2] + "\n"
+    indent = "\t"*8
+    code += indent + "};\n"
+    code += indent + "dma_w0_tvalid <= 1;\n"
+    code += indent + "dma_w0_tkeep <= 8'hff;\n"
+    code += indent + "bram_r_addrb[block_count2] <= count;\n"
+    code += indent + "block_count2 <= block_count2 + 1;\n"
+    code += indent + "block_count5 <= block_count2 - 1;\n"
+    code += indent + "if(block_count2 == %d'b%s) begin\n"%(block_count2_width,
+        decimal_to_bin(2**block_count2_width-1, block_count2_width))
+    indent = "\t"*9
+    code += indent + "count <= count + 1;\n"
+    indent = "\t"*8
+    code += indent + "end\n"
+    code += indent + "dma_state <= 3;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # WRITE_BACK: 1: 3 -> transfer continuously
+    code += indent + "3: begin\n"
+    indent = "\t"*8
+    code += indent + "if(dma_w0_tready) begin\n"
+    indent = "\t"*9
+    code += indent + "dma_w0_tdata <= {\n"
+    indent = "\t"*10
+    for i in range(8):
+        code += indent + "bram_r_doutb[block_count5][%d:%d],\n"%(i*8+7, i*8)
+    code = code[:-2] + "\n"
+    indent = "\t"*9
+    code += indent + "};\n"
+    code += indent + "dma_w0_tvalid <= 1;\n"
+    code += indent + "bram_r_addrb[block_count2] <= count;\n"
+    code += indent + "block_count2 <= block_count2 + 1;\n"
+    code += indent + "block_count5 <= block_count2 - 1;\n"
+    code += indent + "if(block_count2 == %d'b%s) begin\n"%(block_count2_width,
+        decimal_to_bin(2**block_count2_width-1, block_count2_width))
+    indent = "\t"*10
+    code += indent + "count <= count + 1;\n"
+    indent = "\t"*9
+    code += indent + "end\n"
+    code += indent + "if(block_count5 == %d'b%s && count == pl_write_len_wb" \
+        ") begin\n"%(block_count5_width, decimal_to_bin(2**block_count5_width-1,
+        block_count5_width))
+    code += indent + "dma_w0_tlast <= 1;\n"
+    code += indent + "dma_state <= 4;\n"
+    indent = "\t"*9
+    code += indent + "end\n"
+    indent = "\t"*8
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # WRITE_BACK: 1: 4 -> last transfer
+    code += indent + "4: begin\n"
+    indent = "\t"*8
+    code += indent + "if(dma_w0_tready) begin\n"
+    indent = "\t"*9
+    code += indent + "dma_w0_tvalid <= 0;\n"
+    code += indent + "dma_w0_tlast <= 0;\n"
+    code += indent + "dma_state <= 5;\n"
+    indent = "\t"*8
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # WRITE_BACK: 1: 5 -> reset
+    code += indent + "5: begin\n"
+    indent = "\t"*8
+    code += indent + "dma_state <= 0;\n"
+    code += indent + "internal_state <= 0;\n"
+    code += indent + "count <= 0;\n"
+    code += indent + "block_count2 <= 0;\n"
+    code += indent + "block_count5 <= 0;\n"
+    code += indent + "state <= PL_INSTR_READ;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "endcase\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t"
+    code += indent + "endcase\n"
     indent = "\t\t\t"
     code += indent + "end\n"
+    # PL_INSTR_FINISH
+    code += indent + "PL_INSTR_FINISH: begin\n"
+    indent = "\t\t\t\t"
+    code += indent + "last_pl_instr <= 0;\n"
+    code += indent + "state <= PS_INSTR_READ;\n"
+    code += indent + "internal_state <= 0;\n"
+    indent = "\t\t\t"
+    code += indent + "end\n"
+    # FULLY_CONNECT
+    code += indent + "FULLY_CONNECT: begin\n"
+    indent = "\t\t\t\t"
+    code += indent + "case(internal_state)\n"
+    indent = "\t\t\t\t\t"
+    # FULLY_CONNECT: 0 -> decode
+    code += indent + "0: begin\n"
+    indent = "\t\t\t\t\t\t"
+    pl_fc_instr_field_list = [
+        ("ps_activation_fc", ps_activation_fc_width),
+        ("ps_hidden_channel_fc", ps_hidden_channel_fc_width),
+        ("ps_output_channel_fc", ps_output_channel_fc_width),
+        ("ps_layer_mux_fc", ps_layer_mux_fc_width),
+    ]
+    pl_fc_instr_field_exponent_list = [
+    ]
+    len_accumulate = ps_calc_type_width
+    for pair in pl_fc_instr_field_list:
+        if(pair[0] in pl_fc_instr_field_exponent_list):
+            code += indent + "%s <= %d'b1 << ps_instruction[%d:%d];\n"%(
+                pair[0], pair[2], pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
+            code += indent + "%s <= ps_instruction[%d:%d];\n"%(
+                pair[3], pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
+        else:
+            code += indent + "%s <= ps_instruction[%d:%d];\n"%(pair[0], 
+                pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
+        len_accumulate += pair[1]
+    code += indent + "internal_state <= 1;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # FULLY_CONNECT: 1 -> set parameters
+    code += indent + "1: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "dma_r0_tready <= 1;\n"
+    code += indent + "fc_hidden_len <= ps_hidden_channel_fc >> 3;\n"
+    code += indent + "fc_output_len <= ps_output_channel_fc;\n"
+    code += indent + "fc_mux <= ps_layer_mux_fc;\n"
+    code += indent + "fc_activation <= ps_activation_fc;\n"
+    code += indent + "internal_state <= 2;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # FULLY_CONNECT: 2 -> receive data from hidden layer
+    code += indent + "2: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "if(dma_r0_tvalid) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "fc_din <= dma_r0_tdata;\n"
+    code += indent + "fc_invalid <= 1;\n"
+    code += indent + "fc_datatype <= 0;\n"
+    code += indent + "if(dma_r0_tlast) begin\n"
+    indent = "\t\t\t\t\t\t\t\t"
+    code += indent + "internal_state <= 3;\n"
+    code += indent + "dma_r0_tready <= 0;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "else begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "fc_invalid <= 0;\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # FULLY_CONNECT: 3 -> read last data from hidden layer
+    code += indent + "3: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "fc_invalid <= 0;\n"
+    code += indent + "dma_r0_tready <= 1;\n"
+    code += indent + "internal_state <= 4;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # FULLY_CONNECT: 4 -> calculation
+    # receive weight data
+    code += indent + "4: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "if(dma_r0_tvalid) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "fc_din <= dma_r0_tdata;\n"
+    code += indent + "fc_invalid <= 1;\n"
+    code += indent + "fc_datatype <= 1;\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "else begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "fc_invalid <= 0;\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # save results
+    code += indent + "if(fc_outvalid) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "count <= count + 1;\n"
+    code += indent + "bram_r_addra[block_count3] <= count3;\n"
+    code += indent + "bram_r_wea[block_count3] <= 1;\n"
+    code += indent + "bram_r_dina[block_count3] <= {56'h0, fc_dout};\n"
+    code += indent + "block_count3 <= block_count3 + 1;\n"
+    code += indent + "if(block_count3 == %d) begin\n"%(OUTPUT_BUF_COL-1)
+    indent = "\t"*8
+    code += indent + "count3 <= count3 + 1;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # finish
+    code += indent + "if(count == fc_output_len) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "count <= 0;\n"
+    code += indent + "count3 <= 0;\n"
+    code += indent + "block_count3 <= 0;\n"
+    code += indent + "fc_invalid <= 0;\n"
+    code += indent + "fc_datatype <= 0;\n"
+    code += indent + "dma_r0_tready <= 0;\n"
+    code += indent + "internal_state <= 5;\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # FULLY_CONNECT: 5 -> dma write back
+    code += indent + "5: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "case(dma_state)\n"
+    indent = "\t\t\t\t\t\t\t"
+    # FULLY_CONNECT: 5: 0
+    code += indent + "0: begin\n"
+    indent = "\t"*8
+    code += indent + "bram_r_addrb[block_count3] <= 0;\n"
+    code += indent + "block_count3 <= block_count3 + 1;\n"
+    code += indent + "block_count4 <= block_count3 - 1;\n"
+    code += indent + "count3 <= 0;\n"
+    code += indent + "dma_state <= 1;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # FULLY_CONNECT: 5: 1
+    code += indent + "1: begin\n"
+    indent = "\t"*8
+    code += indent + "bram_r_addrb[block_count3] <= 0;\n"
+    code += indent + "block_count3 <= block_count3 + 1;\n"
+    code += indent + "block_count4 <= block_count3 - 1;\n"
+    code += indent + "count3 <= 0;\n"
+    code += indent + "dma_state <= 2;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # FULLY_CONNECT: 5: 2
+    code += indent + "2: begin\n"
+    indent = "\t"*8
+    code += indent + "bram_r_addrb[block_count3] <= 0;\n"
+    code += indent + "block_count3 <= block_count3 + 1;\n"
+    code += indent + "block_count4 <= block_count3 - 1;\n"
+    code += indent + "count3 <= 0;\n"
+    code += indent + "count <= count + 1;\n"
+    code += indent + "dma_w0_tdata <= bram_r_doutb[block_count4];\n"
+    code += indent + "dma_w0_tvalid <= 1;\n"
+    code += indent + "dma_w0_tkeep <= 8'b11111111;\n"
+    code += indent + "dma_state <= 3;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # FULLY_CONNECT: 5: 3
+    code += indent + "3: begin\n"
+    indent = "\t"*8
+    code += indent + "if(dma_w0_tready) begin\n"
+    indent = "\t"*9
+    code += indent + "bram_r_addrb[block_count3] <= count3;\n"
+    code += indent + "block_count3 <= block_count3 + 1;\n"
+    code += indent + "block_count4 <= block_count3 - 1;\n"
+    code += indent + "if(block_count3 == %d) begin\n"%(OUTPUT_BUF_COL-1)
+    indent = "\t"*10
+    code += indent + "count3 <= count3 + 1;\n"
+    indent = "\t"*9
+    code += indent + "end\n"
+    code += indent + "count <= count + 1;\n"
+    code += indent + "dma_w0_tdata <= bram_r_doutb[block_count4];\n"
+    code += indent + "dma_w0_tvalid <= 1;\n"
+    code += indent + "if(count == fc_output_len - 1) begin\n"
+    indent = "\t"*10
+    code += indent + "dma_w0_tlast <= 1;\n"
+    code += indent + "dma_state <= 4;\n"
+    indent = "\t"*9
+    code += indent + "end\n"
+    indent = "\t"*8
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # FULLY_CONNECT: 5: 4
+    code += indent + "4: begin\n"
+    indent = "\t"*8
+    code += indent + "if(dma_w0_tready) begin\n"
+    indent = "\t"*9
+    code += indent + "dma_w0_tvalid <= 0;\n"
+    code += indent + "dma_w0_tlast <= 0;\n"
+    code += indent + "dma_state <= 5;\n"
+    indent = "\t"*8
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # FULLY_CONNECT: 5: 5
+    code += indent + "5: begin\n"
+    indent = "\t"*8
+    code += indent + "dma_state <= 0;\n"
+    code += indent + "internal_state <= 0;\n"
+    code += indent + "count <= 0;\n"
+    code += indent + "count3 <= 0;\n"
+    code += indent + "block_count3 <= 0;\n"
+    code += indent + "block_count4 <= 0;\n"
+    code += indent + "PS_INSTR_READ;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "endcase\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t"
+    code += indent + "endcase\n"
+    indent = "\t\t\t"
+    code += indent + "end\n"
+    # DATA_TRANSER
+    # TODO
 
     indent = "\t\t"
     code += indent + "endcase\n"
