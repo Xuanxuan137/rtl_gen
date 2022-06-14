@@ -1,15 +1,7 @@
 
 
 
-from calendar import c
-from ftplib import MAXLINE
-from itertools import count, cycle
 import math
-from tkinter.tix import MAX
-from unicodedata import decimal
-from unittest.util import _count_diff_hashable
-
-from numpy import block
 
 
 def decimal_to_bin(value, width):
@@ -2043,11 +2035,101 @@ def gen_top(
     indent = "\t\t\t"
     code += indent + "end\n"
     # DATA_TRANSER
-    # TODO
-
+    code += indent + "DATA_TRANSFER: begin\n"
+    indent = "\t\t\t\t"
+    code += indent + "case(internal_state) \n"
+    indent = "\t\t\t\t\t"
+    # DATA_TRANSFER: 0 -> pull up dma_tready
+    code += indent + "0: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "dma_r0_tready <= 1;\n"
+    code += indent + "dma_r1_tready <= 1;\n"
+    code += indent + "internal_state <= 1;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # DATA_TRANSFER: 1 -> read data into bram
+    code += indent + "1: begin\n"
+    indent = "\t\t\t\t\t\t"
+    # read weight data into bram_a
+    code += indent + "if(dma_r0_tvalid && !r0_read_finished) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "bram_a_dina[block_count0] <= dma_r0_tdata;\n"
+    code += indent + "bram_a_addra[block_count0] <= count0;\n"
+    code += indent + "bram_a_wea[block_count0] <= 1;\n"
+    code += indent + "block_count0 <= block_count0 + 1;\n"
+    code += indent + "if(block_count0 == %d) begin\n"%(WEIGHT_BUF_COL-1)
+    indent = "\t"*8
+    code += indent + "count0 <= count0 + 1;\n"
+    code += indent + "if(count0 == ps_weight_len - 1) begin\n"
+    indent = "\t"*9
+    code += indent + "r0_read_finished <= 1;\n"
+    indent = "\t"*8
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # read feature map data into bram_b
+    code += indent + "if(dma_r1_tvalid && !r1_read_finished) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "bram_b_dina[block_count1] <= dma_r1_tdata;\n"
+    code += indent + "bram_b_addra[block_count1] <= count1;\n"
+    code += indent + "bram_b_wea[block_count1] <= 1;\n"
+    code += indent + "block_count1 <= block_count1 + 1;\n"
+    code += indent + "if(block_count == %d) begin\n"%(FEATURE_MAP_BUF_COL-1)
+    indent = "\t"*8
+    code += indent + "count1 <= count1 + 1;\n"
+    code += indent + "if(count1 == ps_feature_map_len - 1) begin\n"
+    indent = "\t"*9
+    code += indent + "read_r1_finished <= 1;\n"
+    indent = "\t"*8
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    # finish reading
+    code += indent + "if(r0_read_finished & r1_read_finished) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "dma_r0_tready <= 0;\n"
+    code += indent + "dma_r1_tready <= 0;\n"
+    code += indent + "r0_read_finished <= 0;\n"
+    code += indent + "r1_read_finished <= 0;\n"
+    code += indent + "count0 <= 0;\n"
+    code += indent + "count1 <= 0;\n"
+    code += indent + "block_count0 <= 0;\n"
+    code += indent + "block_count1 <= 0;\n"
+    for i in range(WEIGHT_BUF_COL):
+        code += indent + "bram_a_addra[%d] <= 0;\n"%(i)
+    for i in range(WEIGHT_BUF_COL):
+        code += indent + "bram_a_wea[%d] <= 0;\n"%(i)
+    for i in range(WEIGHT_BUF_COL):
+        code += indent + "bram_a_dina[%d] <= 0;\n"%(i)
+    for i in range(FEATURE_MAP_BUF_COL):
+        code += indent + "bram_b_addra[%d] <= 0;\n"%(i)
+    for i in range(FEATURE_MAP_BUF_COL):
+        code += indent + "bram_b_wea[%d] <= 0;\n"%(i)
+    for i in range(FEATURE_MAP_BUF_COL):
+        code += indent + "bram_b_dina[%d] <= 0;\n"%(i)
+    code += indent + "internal_state <= 2;\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # DATA_TRANSFER: 2 -> set addr of instrset
+    code += indent + "2: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "instrset_addr <= ps_instr_start_addr;\n"
+    code += indent + "state <= PL_INSTR_READ;\n"
+    code += indent + "internal_state <= 0;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t"
+    code += indent + "endcase\n"
+    indent = "\t\t\t"
+    code += indent + "end\n"
     indent = "\t\t"
     code += indent + "endcase\n"
-
     indent = "\t"
     code += indent + "end\n"
 
