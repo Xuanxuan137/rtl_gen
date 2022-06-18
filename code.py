@@ -400,5 +400,9 @@ def gen_code(
         f.write(main_code)
 
     # 生成c
+    for i in calc_process_with_parallel:
+        for j in i:
+            print(j)
+        print("\n\n")
 
     # 生成instrset

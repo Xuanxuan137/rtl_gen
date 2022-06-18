@@ -137,6 +137,15 @@ def gen_top(
     code += indent + "reg [%d:0] bram_a_addrb[%d:0];\n"%(
         weight_buf_addr_bit_width-1, WEIGHT_BUF_COL-1)
     code += indent + "wire [63:0] bram_a_doutb[%d:0];\n"%(WEIGHT_BUF_COL-1)
+    debug_signals.append(["bram_a_ena", 1, WEIGHT_BUF_COL])
+    debug_signals.append(["bram_a_wea", 1, WEIGHT_BUF_COL])
+    debug_signals.append(["bram_a_addra", weight_buf_addr_bit_width, 
+        WEIGHT_BUF_COL])
+    debug_signals.append(["bram_a_dina", 64, WEIGHT_BUF_COL])
+    debug_signals.append(["bram_a_enb", 1, WEIGHT_BUF_COL])
+    debug_signals.append(["bram_a_addrb", weight_buf_addr_bit_width, 
+        WEIGHT_BUF_COL])
+    debug_signals.append(["bram_a_doutb", 64, WEIGHT_BUF_COL])
     # bram_B port
     code += indent + "reg bram_b_ena[%d:0];\n"%(FEATURE_MAP_BUF_COL-1)
     code += indent + "reg bram_b_wea[%d:0];\n"%(WEIGHT_BUF_COL-1)
@@ -146,7 +155,17 @@ def gen_top(
     code += indent + "reg bram_b_enb[%d:0];\n"%(FEATURE_MAP_BUF_COL-1)
     code += indent + "reg [%d:0] bram_b_addrb[%d:0];\n"%(
         feature_map_buf_addr_bit_width-1, FEATURE_MAP_BUF_COL-1)
-    code += indent + "wire [63:0] bram_b_doutb[%d:0];\n"%(FEATURE_MAP_BUF_COL-1)
+    code += indent + "wire [63:0] bram_b_doutb[%d:0];\n"%(
+        FEATURE_MAP_BUF_COL-1)
+    debug_signals.append(["bram_b_ena", 1, FEATURE_MAP_BUF_COL])
+    debug_signals.append(["bram_b_wea", 1, FEATURE_MAP_BUF_COL])
+    debug_signals.append(["bram_b_addra", feature_map_buf_addr_bit_width,
+        FEATURE_MAP_BUF_COL])
+    debug_signals.append(["bram_b_dina", 64, FEATURE_MAP_BUF_COL])
+    debug_signals.append(["bram_b_enb", 1, FEATURE_MAP_BUF_COL])
+    debug_signals.append(["bram_b_addrb", feature_map_buf_addr_bit_width, 
+        FEATURE_MAP_BUF_COL])
+    debug_signals.append(["bram_b_doutb", 64, FEATURE_MAP_BUF_COL])
     # instantiate bram_A
     for i in range(WEIGHT_BUF_COL):
         code += indent + "blk_64_%d bram_a_%d (\n"%(WEIGUT_BUF_DEPTH, i)
@@ -188,6 +207,15 @@ def gen_top(
     code += indent + "reg [%d:0] bram_r_addrb[%d:0];\n"%(
         output_buf_addr_bit_width-1, OUTPUT_BUF_COL-1)
     code += indent + "wire [63:0] bram_r_doutb[%d:0];\n"%(OUTPUT_BUF_COL-1)
+    debug_signals.append(["bram_r_ena", 1, OUTPUT_BUF_COL])
+    debug_signals.append(["bram_r_wea", 1, OUTPUT_BUF_COL])
+    debug_signals.append(["bram_r_addra", output_buf_addr_bit_width, 
+        OUTPUT_BUF_COL])
+    debug_signals.append(["bram_r_dina", 64, OUTPUT_BUF_COL])
+    debug_signals.append(["bram_r_enb", 1, OUTPUT_BUF_COL])
+    debug_signals.append(["bram_r_addrb", output_buf_addr_bit_width,
+        OUTPUT_BUF_COL])
+    debug_signals.append(["bram_r_doutb", 64, OUTPUT_BUF_COL])
     # instantiate bram_C
     for i in range(OUTPUT_BUF_COL):
         code += indent + "blk_64_%d bram_r_%d (\n"%(OUTPUT_BUF_DEPTH, i)
@@ -766,8 +794,8 @@ def gen_top(
     code += indent + "0: begin\n"
     indent = "\t\t\t\t\t\t"
     code += indent + "pl_instruction <= instrset_dout;\n"
-    code += indent + "instr_addr <= instr_addr + 1;\n"
-    code += indent + "if(instr_addr == ps_instr_end_addr) begin\n"
+    code += indent + "instrset_addr <= instrset_addr + 1;\n"
+    code += indent + "if(instrset_addr == ps_instr_end_addr) begin\n"
     indent = "\t\t\t\t\t\t\t"
     code += indent + "last_pl_instr <= 1;\n"
     indent = "\t\t\t\t\t\t"
@@ -2134,9 +2162,79 @@ def gen_top(
     code += indent + "end\n"
 
     
+    # instantiate modules
     
+    # conv
+    for unit in range(CALC_UNIT_PER_BRAM_GROUP):
+        code += indent + "conv c%d (\n"%(unit)
+        indent = "\t\t"
+        code += indent + ".clk(clk),\n"
+        code += indent + ".mux(conv_mux_%d),\n"%(unit)
+        code += indent + ".valid(conv_in_valid_%d),\n"%(unit)
+        code += indent + ".ina(conv_ina_%d),\n"%(unit)
+        code += indent + ".inb(conv_inb_%d),\n"%(unit)
+        for port in CONV_OUTPUT_PORTS:
+            code += indent + ".add%d_o(conv_add%d_%d),\n"%(
+                port, port, unit)
+            code += indent + ".valid%d(conv_add%d_valid_%d),\n"%(
+                port, port, unit)
+        code = code[:-2] + "\n"
+        indent = "\t"
+        code += indent + ");\n"
+    
+    # fc
+    code += indent + "fc fc0(\n"
+    indent = "\t\t"
+    code += indent + ".clk(clk),\n"
+    code += indent + ".din(fc_din),\n"
+    code += indent + ".in_valid(fc_invalid),\n"
+    code += indent + ".data_type(fc_datatype),\n"
+    code += indent + ".len(fc_hidden_len),\n"
+    code += indent + ".out_len(fc_output_len),\n"
+    code += indent + ".mux(fc_mux),\n"
+    code += indent + ".activation(fc_activation),\n"
+    code += indent + ".dout(fc_dout),\n"
+    code += indent + ".out_valid(fc_outvalid),\n"
+    code = code[:-2] + "\n"
+    indent = "\t"
+    code += indent + ");\n"
 
+    # post_process
+    for unit in range(CALC_UNIT_PER_BRAM_GROUP):
+        code += indent + "post_process pp0(\n"
+        indent = "\t\t"
+        code += indent + ".clk(clk),\n"
+        code += indent + ".in_contiguous(pp_din_%d),\n"%(unit)
+        code += indent + ".channel(pp_channel_%d),\n"%(unit)
+        code += indent + ".mux(pp_mux_%d),\n"%(unit)
+        code += indent + ".activation(pp_activation_%d),\n"%(unit)
+        code += indent + ".out_contiguous(pp_dout_%d),\n"%(unit)
+    code = code[:-2] + "\n"
+    indent = "\t"
+    code += indent + ");\n"
 
+    # instrset
+    code += indent + "instrset instrset0(\n"
+    indent = "\t\t"
+    code += indent + ".clk(clk),\n"
+    code += indent + ".addr(instrset_addr),\n"
+    code += indent + ".dout(instrset_dout),\n"
+    code = code[:-2] + "\n"
+    indent = "\t"
+    code += indent + ");\n"
+
+    
+    # generate simulation debug signals
+    indent = ""
+    code += indent + "// simulation only\n"
+    for signal in debug_signals:
+        signal_name = signal[0]
+        signal_width = signal[1]
+        signal_depth = signal[2]
+        for i in range(signal_depth):
+            code += indent + "wire [%d:0] %s_probe_%d = %s[%d];\n"%(
+                signal_width-1, signal_name, i, signal_name, i
+            )
 
 
     code += "endmodule"
