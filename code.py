@@ -7,6 +7,7 @@ import cpu_int
 import conv
 import fc
 import post_process
+import add
 import top
 import instr
 
@@ -33,6 +34,84 @@ def get_fc_amount(calculation_graph):
             type(node) == op.QDense):
             count += 1
     return count
+
+
+def get_add_amount(calculation_graph):
+    '''
+    Get the amount of add layers in calculation_graph
+    '''
+    count = 0
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.Add or 
+            type(node) == op.QAdd):
+            count += 1
+    return count
+
+
+def get_add_coe(calculation_graph):
+    '''
+    Get coe of each add layers
+    '''
+    coe1 = []
+    coe2 = []
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.QAdd):
+            coe1.append(node.coe1)
+            coe2.append(node.coe2)
+    coe = (coe1, coe2)
+    return coe
+
+
+def get_add_rshift(calculation_graph):
+    '''
+    Get rshift of each add layers
+    '''
+    rshift1 = []
+    rshift2 = []
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.QAdd):
+            rshift1.append(node.rshift1)
+            rshift2.append(node.rshift2)
+    rshift = (rshift1, rshift2)
+    return rshift
+
+
+def get_add_zero_x(calculation_graph):
+    '''
+    Get zero_x of each add layers
+    '''
+    zero_x1 = []
+    zero_x2 = []
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.QAdd):
+            zero_x1.append(node.zero_x1)
+            zero_x2.append(node.zero_x2)
+    zero_x = (zero_x1, zero_x2)
+    return zero_x
+
+
+def get_add_zero_y(calculation_graph):
+    '''
+    Get zero_y of each add layers
+    '''
+    zero_y = []
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.QAdd):
+            zero_y.append(node.zero_y)
+    return zero_y
+
+
+def get_add_qmin_qmax(calculation_graph):
+    '''
+    Get qmin qmax of each add layers
+    '''
+    qmin = []
+    qmax = []
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.QAdd):
+            qmin.append(node.qmin)
+            qmax.append(node.qmax)
+    return qmin, qmax
 
 
 def get_output_ports(submatrix_size):
@@ -366,6 +445,29 @@ def gen_code(
         calculation_graph
     )
 
+    # generate add
+    add_mux_width = instr_analyse_result["ps_layer_mux_for_add"]
+    add_total_count_width = instr_analyse_result["ps_total_count_for_add"]
+    add_coe = get_add_coe(calculation_graph)
+    add_rshift = get_add_rshift(calculation_graph)
+    add_zero_x = get_add_zero_x(calculation_graph)
+    add_zero_y = get_add_zero_y(calculation_graph)
+    add_qmin, add_qmax = get_add_qmin_qmax(calculation_graph)
+    add_code = add.gen_add(
+        MODULE_NAME="add",
+        MUX_WIDTH=add_mux_width,
+        TOTAL_COUNT_WIDTH=add_total_count_width,
+        COE=add_coe,
+        RSHIFT=add_rshift,
+        ZERO_X=add_zero_x,
+        ZERO_Y=add_zero_y,
+        QMAX=add_qmax[0],
+        QMIN=add_qmin[0],
+        DEUG=True
+    )
+    with open("output/add.v", "w") as f:
+        f.write(add_code)
+
     # 生成main
     weight_buffer_col = (max_len_support // 8) if(bram_group == 0) else \
         (max_len_support // 8) * bram_group
@@ -400,9 +502,6 @@ def gen_code(
         f.write(main_code)
 
     # 生成c
-    for i in calc_process_with_parallel:
-        for j in i:
-            print(j)
-        print("\n\n")
+
 
     # 生成instrset

@@ -20,8 +20,11 @@ instruction from ps to pl
 2. activation
 3. hidden_channel
 4. output_channel
-5. layer mux
+5. layer_mux
 6. terminator
+ - for add
+2. total_count  (number of data to add)
+3. layer_mux
 
 instruction in pl
 1. calculation type(including:
@@ -181,7 +184,7 @@ def analyse_instr(
     # # # layer mux
     fc_amount = 0
     for n, node in enumerate(calculation_graph):
-        if(type(node) == op.Dense or 
+        if(type(node) == op.Dense or
             type(node) == op.QDense):
             fc_amount += 1
     ps_layer_mux_for_fc = max(math.ceil(math.log2(fc_amount)), 1)
@@ -190,12 +193,41 @@ def analyse_instr(
     ps_bit_width_need_fc = ps_calculation_type + \
         ps_activation_for_fc + ps_hidden_channel_for_fc + \
         ps_output_channel_for_fc + ps_layer_mux_for_fc
+
     
+    # # instruction filed for add
+    # # # total_count
+    max_count = 0
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.Add or
+            type(node) == op.QAdd):
+            output_shape = calculation_graph[node.input1].output_shape
+            count = 1
+            for i in output_shape:
+                count *= i
+            max_count = max_count if(max_count > count) else count
+    ps_total_count_for_add = max(math.ceil(math.log2(max_count)+1), 1)
+    
+    # # # layer mux
+    add_amount = 0
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.Add or
+            type(node) == op.QAdd):
+            add_amount += 1
+    ps_layer_mux_for_add = max(math.ceil(math.log2(add_amount)), 1)
+    
+    # # # ps bit width need by add
+    ps_bit_width_need_add = ps_calculation_type + \
+        ps_total_count_for_add + ps_layer_mux_for_add
     
     # # ps bit width need
     ps_bit_width_need = math.ceil(
-        max(ps_bit_width_need_conv, ps_bit_width_need_fc) / 32) * 32
-    
+        max(
+            ps_bit_width_need_conv, 
+            ps_bit_width_need_fc,
+            ps_bit_width_need_add
+        ) / 32) * 32
+
 
 
     # instructions in pl
@@ -273,7 +305,7 @@ def analyse_instr(
     # # # layer mux
     conv_amount = 0
     for n, node in enumerate(calculation_graph):
-        if(type(node) == op.Conv2d or 
+        if(type(node) == op.Conv2d or
             type(node) == op.QConv2d):
             conv_amount += 1
     pl_layer_mux_for_conv = max(math.ceil(math.log2(conv_amount)), 1)
@@ -309,7 +341,7 @@ def analyse_instr(
     # # # start channel
     max_channel = 0
     for n, node in enumerate(calculation_graph):
-        if(type(node) == op.Conv2d or 
+        if(type(node) == op.Conv2d or
             type(node) == op.QConv2d):
             output_channel = node.output_channel
             max_channel = max(max_channel, output_channel)
@@ -372,6 +404,9 @@ def analyse_instr(
         "ps_output_channel_for_fc": ps_output_channel_for_fc,
         "ps_layer_mux_for_fc": ps_layer_mux_for_fc,
         "ps_bit_width_need_for_fc": ps_bit_width_need_fc,
+        "ps_total_count_for_add": ps_total_count_for_add,
+        "ps_layer_mux_for_add": ps_layer_mux_for_add,
+        "ps_bit_width_need_for_add": ps_bit_width_need_add,
         "ps_bit_width_need": ps_bit_width_need,
         "pl_calculation_type": pl_calculation_type,
         "pl_mult_side_length_for_conv": pl_multiply_side_length_for_conv, #e
