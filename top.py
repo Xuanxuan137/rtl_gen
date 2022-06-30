@@ -2,6 +2,7 @@
 
 
 import math
+from pickle import INST
 
 
 def decimal_to_bin(value, width):
@@ -338,6 +339,18 @@ def gen_top(
     code += indent + "reg [%d:0] instrset_addr;\n"%(pl_instr_addr_width-1)
     code += indent + "wire [%d:0] instrset_dout;\n"%(pl_instr_width-1)
 
+    # signals for add
+    add_total_count_width = INSTR_ANALYSE_RESULT["ps_total_count_for_add"]
+    add_layer_mux_width = INSTR_ANALYSE_RESULT["ps_layer_mux_for_add"]
+    code += indent + "reg [%d:0] add_total_count;\n"%(add_total_count_width-1)
+    code += indent + "reg [%d:0] add_mux;\n"%(add_layer_mux_width-1)
+    code += indent + "reg add_reset;\n"
+    code += indent + "wire add_r0_tready;\n"
+    code += indent + "wire add_r1_tready;\n"
+    code += indent + "wire [%d:0] add_w0_tdata;\n"%(dma_bit_width-1)
+    code += indent + "wire add_w0_tvalid;\n"
+    code += indent + "wire add_w0_tlast;\n"
+
     # initialize signals of modules
     code += indent + "initial begin\n"
     indent = "\t\t"
@@ -360,6 +373,9 @@ def gen_top(
         code += indent + "pp_mux_%d = 0;\n"%(unit)
         code += indent + "pp_activation_%d = 0;\n"%(unit)
     code += indent + "instrset_addr = 0;\n"
+    code += indent + "add_total_count = 0;\n"
+    code += indent + "add_mux = 0;\n"
+    code += indent + "add_reset = 0;\n"
     indent = "\t"
     code += indent + "end\n"
 
@@ -497,6 +513,13 @@ def gen_top(
     code += indent + "reg [%d:0] ps_output_channel_fc;\n"%(
         ps_output_channel_fc_width-1)
     code += indent + "reg [%d:0] ps_layer_mux_fc;\n"%(ps_layer_mux_fc_width-1)
+    # signals for add
+    ps_total_count_add_width = INSTR_ANALYSE_RESULT["ps_total_count_for_add"]
+    ps_layer_mux_add_width = INSTR_ANALYSE_RESULT["ps_layer_mux_for_add"]
+    code += indent + "reg [%d:0] ps_total_count_add;\n"%(
+        ps_total_count_add_width-1)
+    code += indent + "reg [%d:0] ps_layer_mux_add;\n"%(
+        ps_layer_mux_add_width-1)
 
     # signals for top state machine
     states = [
@@ -508,6 +531,7 @@ def gen_top(
         "FULLY_CONNECT",
         "DATA_TRANSFER",
         "PL_INSTR_FINISH",
+        "ADD",
     ]
     state_bit_width = len(states)
     code += indent + "reg [%d:0] state;\n"%(state_bit_width-1)
@@ -617,6 +641,8 @@ def gen_top(
     code += indent + "ps_hidden_channel_fc = 0;\n"
     code += indent + "ps_output_channel_fc = 0;\n"
     code += indent + "ps_layer_mux_fc = 0;\n"
+    code += indent + "ps_total_count_add = 0;\n"
+    code += indent + "ps_layer_mux_add = 0;\n"
     code += indent + "state = 0;\n"
     code += indent + "internal_state = 0;\n"
     code += indent + "dma_state = 0;\n"
@@ -2156,6 +2182,94 @@ def gen_top(
     code += indent + "endcase\n"
     indent = "\t\t\t"
     code += indent + "end\n"
+    # ADD
+    code += indent + "ADD: begin\n"
+    indent = "\t\t\t\t"
+    code += indent + "case(internal_state)\n"
+    indent = "\t\t\t\t\t"
+    # ADD: 0 -> decode
+    code += indent + "0: begin\n"
+    indent = "\t\t\t\t\t\t"
+    pl_add_instr_field_list = [
+        ("ps_total_count_add", ps_total_count_add_width),
+        ("ps_layer_mux_add", ps_layer_mux_add_width),
+    ]
+    pl_add_instr_field_exponent_list = [
+    ]
+    len_accumulate = ps_calc_type_width
+    for pair in pl_add_instr_field_list:
+        if(pair[0] in pl_add_instr_field_exponent_list):
+            code += indent + "%s <= %d'b1 << ps_instruction[%d:%d];\n"%(
+                pair[0], pair[2], pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
+            code += indent + "%s <= ps_instruction[%d:%d];\n"%(
+                pair[3], pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
+        else:
+            code += indent + "%s <= ps_instruction[%d:%d];\n"%(pair[0], 
+                pl_instr_width - 1 - len_accumulate, 
+                pl_instr_width - len_accumulate - pair[1])
+        len_accumulate += pair[1]
+    code += indent + "internal_state <= 1;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # ADD: 1 -> update arguments
+    code += indent + "1: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "add_total_count <= ps_total_count_add;\n"
+    code += indent + "add_mux <= ps_layer_mux_add;\n"
+    code += indent + "internal_state <= 2;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # ADD: 2 -> calculate
+    code += indent + "2: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "dma_r0_tready <= add_r0_tready;\n"
+    code += indent + "dma_r1_tready <= add_r1_tready;\n"
+    code += indent + "if(dma_w0_tready) begin\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "dma_w0_tdata <= add_w0_tdata;\n"
+    code += indent + "dma_w0_tvalid <= add_w0_tvalid;\n"
+    code += indent + "dma_w0_tlast <= add_w0_tlast;\n"
+    code += indent + "if(add_w0_tvalid) begin\n"
+    indent = "\t"*8
+    code += indent + "dma_w0_tkeep <= 8'hff;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "if(dma_w0_tlast) begin\n"
+    indent = "\t"*8
+    code += indent + "internal_state <= 3;\n"
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # ADD: 3 -> reset add module
+    code += indent + "3: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "add_reset <= 1;\n"
+    code += indent + "internal_state <= 4;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # ADD: 4 -> continue reset add module
+    code += indent + "4: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "internal_state <= 5;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    # ADD: 5 -> reset
+    code += indent + "5: begin\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "add_reset <= 0;\n"
+    code += indent + "state <= PS_INSTR_READ;\n"
+    code += indent + "internal_state <= 0;\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t\t"
+    code += indent + "endcase\n"
+    indent = "\t\t\t"
+    code += indent + "end\n"
     indent = "\t\t"
     code += indent + "endcase\n"
     indent = "\t"
@@ -2220,6 +2334,28 @@ def gen_top(
     code += indent + ".addr(instrset_addr),\n"
     code += indent + ".dout(instrset_dout),\n"
     code = code[:-2] + "\n"
+    indent = "\t"
+    code += indent + ");\n"
+
+    # add
+    code += indent + "add add0(\n"
+    indent = "\t\t"
+    code += indent + ".clk(clk),\n"
+    code += indent + ".reset(add_reset),\n"
+    code += indent + ".total_count(add_total_count),\n"
+    code += indent + ".r0_tdata(dma_r0_tdata),\n"
+    code += indent + ".r0_tvalid(dma_r0_tvalid),\n"
+    code += indent + ".r0_tready(dma_r0_tready),\n"
+    code += indent + ".r1_tdata(dma_r1_tdata),\n"
+    code += indent + ".r1_tvalid(dma_r1_tvalid),\n"
+    code += indent + ".r1_tready(dma_r1_tready),\n"
+    code += indent + ".w0_tready(dma_w0_tready),\n"
+    code += indent + ".mux(add_mux),\n"
+    code += indent + ".add_r0_tready(add_r0_tready),\n"
+    code += indent + ".add_r1_tready(add_r1_tready),\n"
+    code += indent + ".w0_tdata(add_w0_tdata),\n"
+    code += indent + ".w0_tvalid(add_w0_tvalid),\n"
+    code += indent + ".w0_tlast(add_w0_tlast)\n"
     indent = "\t"
     code += indent + ");\n"
 
