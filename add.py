@@ -268,11 +268,286 @@ def gen_add(
     code += indent + "end\n"
 
     # generate zero_x
+    code += indent + "wire signed [8:0] zero_x1;\n"
+    code += indent + "wire signed [8:0] zero_x2;\n"
+    code += indent + "always @(*) begin\n"
+    indent = "\t\t"
+    code += indent + "case(mux)\n"
+    for i in range(len(ZERO_X[0])):
+        indent = "\t\t\t"
+        code += indent + "%d'b%s: begin\n"%(MUX_WIDTH, decimal_to_bin(
+            i, MUX_WIDTH))
+        indent = "\t\t\t\t"
+        code += indent + "zero_x1 <= zero_x1_%d;\n"%(i)
+        code += indent + "zero_x2 <= zero_x2_%d;\n"%(i)
+        indent = "\t\t\t"
+        code += indent + "end\n"
+    code += indent + "default: begin\n"
+    indent = "\t\t\t\t"
+    code += indent + "zero_x1 <= 0;\n"
+    code += indent + "zero_x2 <= 0;\n"
+    indent = "\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t"
+    code += indent + "endcase\n"
+    indent = "\t"
+    code += indent + "end\n"
+
+    # generate zero_y
+    code += indent + "wire signed [31:0] zero_y;\n"
+    code += indent + "always @(*) begin\n"
+    indent = "\t\t"
+    code += indent + "case(mux)\n"
+    for i in range(len(ZERO_Y)):
+        indent = "\t\t\t"
+        code += indent + "%d'b%s: zero_y <= zero_y_%d;\n"%(MUX_WIDTH,
+            decimal_to_bin(i, MUX_WIDTH), i)
+    code += indent + "default: zero_y <= 0;\n"
+    indent = "\t\t"
+    code += indent + "endcase\n"
+    indent = "\t"
+    code += indent + "end\n"
+
+    # assign value to dma_w0
+    code += indent + "assign w0_tdata = {\n"
+    indent = "\t\t"
+    for i in range(dma_count):
+        code += indent + "result[%d],\n"%(dma_count-1-i)
+    code = code[:-2] + "\n"
+    indent = "\t"
+    code += indent + "};\n"
+    code += indent + "assign w0_tvalid = result_valid;\n"
+    code += indent + "assign w0_tlast = last_result;\n"
+
+    # calculate
+    code += indent + "always @(posedge clk) begin\n"
+    indent = "\t\t"
+
+    # # reset
+    code += indent + "if(reset) begin\n"
+    indent = "\t\t\t"
+    code += indent + "raddr0 <= 0;\n"
+    code += indent + "raddr1 <= 0;\n"
+    code += indent + "count <= 0;\n"
+    code += indent + "adder_use_valid <= 0;\n"
+    code += indent + "adder_valid <= 0;\n"
+    code += indent + "fp_temp_valid <= 0;\n"
+    code += indent + "fp_temp_mult_coe_valid <= 0;\n"
+    code += indent + "t_valid <= 0;\n"
+    code += indent + "t_shift_valid <= 0;\n"
+    code += indent + "t_add_valid <= 0;\n"
+    code += indent + "t_add_y_valid <= 0;\n"
+    code += indent + "result_valid <= 0;\n"
+    code += indent + "last_result <= 0;\n"
+    indent = "\t\t"
+    code += indent + "end\n"
+
+    # # calculate
+    code += indent + "else begin\n"
+    indent = "\t\t\t"
+    code += indent + "if(w0_tready) begin\n"
+    indent = "\t\t\t\t"
+    # # # read data from fifo
+    code += indent + "if(!empty0 & !empty1) begin\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "adder_use_valid <= 1;\n"
+    for i in range(dma_count):
+        code += indent + "adder1_use[%d] <= {1'b0, fifo0[raddr0][%d:%d]};\n"%(
+            i, i*8+7, i*8)
+    for i in range(dma_count):
+        code += indent + "adder2_use[%d] <= {1'b0, fifo1[raddr1][%d:%d]};\n"%(
+            i, i*8+7, i*8)
+    code += indent + "raddr0 <= raddr0 + 1;\n"
+    code += indent + "raddr1 <= raddr1 + 1;\n"
+    indent = "\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "else begin\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "adder_use_valid <= 0;\n"
+    indent = "\t\t\t\t"
+    code += indent + "end\n"
+    # # # temp = temp_x - zero_x
+    for i in range(dma_count):
+        code += indent + "adder1[%d] <= adder1_use[%d] - zero_x1;\n"%(i, i)
+    for i in range(dma_count):
+        code += indent + "adder2[%d] <= adder2_use[%d] - zero_x2;\n"%(i, i)
+    code += indent + "adder_valid <= adder_user_valid;\n"
+    # # # fp_temp.assign(temp)
+    for i in range(dma_count):
+        code += indent + "fp_temp1_sign[%d] <= adder1[%d][8];\n"%(i, i)
+        code += indent + "fp_temp1[%d] <= {23'b0, {(adder1[%d] - adder1[%d]" \
+            "[8]) ^ ({9{adder1[%d][8]}})}, 16'b0};\n"%(i, i, i, i)
+    for i in range(dma_count):
+        code += indent + "fp_temp2_sign[%d] <= adder2[%d][8];\n"%(i, i)
+        code += indent + "fp_temp2[%d] <= {23'b0, {(adder2[%d] - adder2[%d]" \
+            "[8]) ^ ({9{adder2[%d][8]}})}, 16'b0};\n"%(i, i, i, i)
+    code += indent + "fp_temp_valid <= adder_valid;\n"
+    # # # fp_temp *= coe
+    for i in range(dma_count):
+        code += indent + "fp_temp1_mult_coe1_sign[%d] <= fp_temp1_sign[%d]" \
+            ";\n"%(i, i)
+        code += indent + "fp_temp1_mult_coe1[%d] <= fp_temp1_mult_coe1_temp" \
+            "[%d][63:16];\n"%(i, i)
+    for i in range(dma_count):
+        code += indent + "fp_temp2_mult_coe2_sign[%d] <= fp_temp2_sign[%d]" \
+            ";\n"%(i, i)
+        code += indent + "fp_temp2_mult_coe2[%d] <= fp_temp2_mult_coe2_temp" \
+            "[%d][63:16];\n"%(i, i)
+    code += indent + "fp_temp_mult_coe_valid <= fp_temp_valid;\n"
+    # # # t = fp_temp.to_int()
+    for i in range(dma_count):
+        code += indent + "t1[%d] <= (fp_temp1_mult_coe1[%d][47:16] ^ {32{" \
+            "fp_temp1_mult_coe1_sign[%d]}}) + fp_temp1_mult_coe1_sign[%d];\n"%(
+            i, i, i, i)
+    for i in range(dma_count):
+        code += indent + "t2[%d] <= (fp_temp2_mult_coe2[%d][47:16] ^ {32{" \
+            "fp_temp2_mult_coe2_sign[%d]}}) + fp_temp2_mult_coe2_sign[%d];\n"%(
+            i, i, i, i)
+    code += indent + "t_valid <= fp_temp_mult_coe_valid;\n"
+    # # # shift
+    code += indent + "if(shift_direction1) begin\n"
+    indent = "\t\t\t\t\t"
+    for i in range(dma_count):
+        code += indent + "t1_shift[%d] <= t1[%d] << rshift1;\n"%(i, i)
+    indent = "\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "else begin\n"
+    indent = "\t\t\t\t\t"
+    for i in range(dma_count):
+        code += indent + "t1_shift[%d] <= t1[%d] >>> rshift1;\n"%(i, i)
+    indent = "\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "if(shift_direction2) begin\n"
+    indent = "\t\t\t\t\t"
+    for i in range(dma_count):
+        code += indent + "t2_shift[%d] <= t2[%d] << rshift2;\n"%(i, i)
+    indent = "\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "else begin\n"
+    indent = "\t\t\t\t\t"
+    for i in range(dma_count):
+        code += indent + "t2_shift[%d] <= t2[%d] >>> rshift2;\n"%(i, i)
+    indent = "\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "t_shift_valid <= t_valid;\n"
+    # # # add
+    for i in range(dma_count):
+        code += indent + "t_add[%d] <= t1_shift[%d] + t2_shift[%d];\n"%(
+            i, i, i)
+    code += indent + "t_add_valid <= t_shift_valid;\n"
+    # # # add zero_y
+    for i in range(dma_count):
+        code += indent + "t_add_y[%d] <= t_add[%d] + zero_y;\n"%(i, i)
+    code += indent + "t_add_y_valid <= t_add_valid;\n"
+    # # # clip
+    for i in range(dma_count):
+        code += indent + "result[%d] <= (t_add_y[%d] < qmin) ? qmin : \n"%(i,i)
+        code += indent + "             (t_add_y[%d] > qmax) ? qmax : \n"%(i)
+        code += indent + "             t_add_y[%d];\n"%(i)
+    code += indent + "result_valid <= t_add_y_valid;\n"
+    # # # update count
+    code += indent + "if(result_valid) begin\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "count <= count + 1;\n"
+    indent = "\t\t\t\t"
+    code += indent + "end\n"
+    # # # update last_result
+    code += indent + "if(count == total_count-2) begin\n"
+    indent = "\t\t\t\t\t"
+    code += indent + "last_result <= 1;\n"
+    indent = "\t\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t"
+    code += indent + "end\n"
+    indent = "\t"
+    code += indent + "end\n"
 
 
+    # write fifo
+    code += indent + "always @(posedge clk) begin\n"
+    indent = "\t\t"
+    code += indent + "if(reset) begin\n"
+    indent = "\t\t\t"
+    code += indent + "waddr0 <= 0;\n"
+    code += indent + "waddr1 <= 0;\n"
+    indent = "\t\t"
+    code += indent + "end\n"
+    code += indent + "else begin\n"
+    indent = "\t\t\t"
+    code += indent + "if(r0_tready) begin\n"
+    indent = "\t\t\t\t"
+    code += indent + "fifo0[waddr0] <= r0_tdata;\n"
+    code += indent + "waddr0 <= waddr0 + 1;\n"
+    indent = "\t\t\t"
+    code += indent + "end\n"
+    code += indent + "if(r1_tready) begin\n"
+    indent = "\t\t\t\t"
+    code += indent + "fifo1[waddr1] <= r1_tdata;\n"
+    code += indent + "waddr1 <= waddr1 + 1;\n"
+    indent = "\t\t\t"
+    code += indent + "end\n"
+    indent = "\t\t"
+    code += indent + "end\n"
+    indent = "\t"
+    code += indent + "end\n"
 
 
-
+    # initial
+    code += indent + "initial begin\n"
+    indent = "\t\t"
+    code += indent + "raddr0 = 0;\n"
+    code += indent + "waddr0 = 0;\n"
+    code += indent + "raddr1 = 0;\n"
+    code += indent + "waddr1 = 0;\n"
+    code += indent + "count = 0;\n"
+    for i in range(dma_count):
+        code += indent + "adder1_use[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "adder2_use[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "adder1[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "adder2[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "fp_temp1_sign[%d] = 0;\n"%(i)
+        code += indent + "fp_temp1[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "fp_temp2_sign[%d] = 0;\n"%(i)
+        code += indent + "fp_temp2[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "fp_temp1_mult_coe1_sign[%d] = 0;\n"%(i)
+        code += indent + "fp_temp1_mult_coe1[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "fp_temp2_mult_coe2_sign[%d] = 0;\n"%(i)
+        code += indent + "fp_temp2_mult_coe2[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "t1[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "t2[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "t1_shift[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "t2_shift[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "t_add[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "t_add_y[%d] = 0;\n"%(i)
+    for i in range(dma_count):
+        code += indent + "result[%d] = 0;\n"%(i)
+    code += indent + "adder_user_valid = 0;\n"
+    code += indent + "adder_valid = 0;\n"
+    code += indent + "fp_temp_valid = 0;\n"
+    code += indent + "fp_temp_mult_coe_valid = 0;\n"
+    code += indent + "t_valid = 0;\n"
+    code += indent + "t_shift_valid = 0;\n"
+    code += indent + "t_add_valid = 0;\n"
+    code += indent + "t_add_y_valid = 0;\n"
+    code += indent + "result_valid = 0;\n"
+    code += indent + "last_result = 0;\n"
+    indent = "\t"
+    code += indent + "end\n"
 
 
     code += "endmodule"
