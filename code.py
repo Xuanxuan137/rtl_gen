@@ -446,27 +446,28 @@ def gen_code(
     )
 
     # generate add
-    add_mux_width = instr_analyse_result["ps_layer_mux_for_add"]
-    add_total_count_width = instr_analyse_result["ps_total_count_for_add"]
-    add_coe = get_add_coe(calculation_graph)
-    add_rshift = get_add_rshift(calculation_graph)
-    add_zero_x = get_add_zero_x(calculation_graph)
-    add_zero_y = get_add_zero_y(calculation_graph)
-    add_qmin, add_qmax = get_add_qmin_qmax(calculation_graph)
-    add_code = add.gen_add(
-        MODULE_NAME="add",
-        MUX_WIDTH=add_mux_width,
-        TOTAL_COUNT_WIDTH=add_total_count_width,
-        COE=add_coe,
-        RSHIFT=add_rshift,
-        ZERO_X=add_zero_x,
-        ZERO_Y=add_zero_y,
-        QMAX=add_qmax[0],
-        QMIN=add_qmin[0],
-        DEUG=True
-    )
-    with open("output/add.v", "w") as f:
-        f.write(add_code)
+    if(instr.add_in_graph(calculation_graph)):
+        add_mux_width = instr_analyse_result["ps_layer_mux_for_add"]
+        add_total_count_width = instr_analyse_result["ps_total_count_for_add"]
+        add_coe = get_add_coe(calculation_graph)
+        add_rshift = get_add_rshift(calculation_graph)
+        add_zero_x = get_add_zero_x(calculation_graph)
+        add_zero_y = get_add_zero_y(calculation_graph)
+        add_qmin, add_qmax = get_add_qmin_qmax(calculation_graph)
+        add_code = add.gen_add(
+            MODULE_NAME="add",
+            MUX_WIDTH=add_mux_width,
+            TOTAL_COUNT_WIDTH=add_total_count_width,
+            COE=add_coe,
+            RSHIFT=add_rshift,
+            ZERO_X=add_zero_x,
+            ZERO_Y=add_zero_y,
+            QMAX=add_qmax[0],
+            QMIN=add_qmin[0],
+            DEUG=True
+        )
+        with open("output/add.v", "w") as f:
+            f.write(add_code)
 
     # 生成main
     weight_buffer_col = (max_len_support // 8) if(bram_group == 0) else \
@@ -501,7 +502,8 @@ def gen_code(
     with open("output/top.v", "w") as f:
         f.write(main_code)
 
-    # 生成c
-
-
     # 生成instrset
+    for i in calc_process_with_parallel:
+        print(i)
+
+    # 生成c

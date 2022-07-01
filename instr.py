@@ -56,6 +56,39 @@ import math
 import op
 
 
+def conv_in_graph(calculation_graph):
+    '''
+    Judge if there is any `conv` operators in the calculation_graph
+    '''
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.Conv2d or 
+            type(node) == op.QConv2d):
+            return True
+    return False
+
+
+def fc_in_graph(calculation_graph):
+    '''
+    Judge if there is any `fc` operators in the calculation_graph
+    '''
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.Dense or
+            type(node) == op.QDense):
+            return True
+    return False
+
+
+def add_in_graph(calculation_graph):
+    '''
+    Judge if there is any `add` operators in the calculation_graph
+    '''
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.Add or 
+            type(node) == op.QAdd):
+            return True
+    return False
+
+
 def analyse_instr(
     analyse_result,
     calculation_graph
@@ -195,7 +228,7 @@ def analyse_instr(
         ps_output_channel_for_fc + ps_layer_mux_for_fc
 
     
-    # # instruction filed for add
+    # # instruction field for add
     # # # total_count
     max_count = 0
     for n, node in enumerate(calculation_graph):
@@ -206,7 +239,8 @@ def analyse_instr(
             for i in output_shape:
                 count *= i
             max_count = max_count if(max_count > count) else count
-    ps_total_count_for_add = max(math.ceil(math.log2(max_count)+1), 1)
+    ps_total_count_for_add = max(math.ceil(math.log2(max_count)+1), 1) if(
+        add_in_graph(calculation_graph)) else 0
     
     # # # layer mux
     add_amount = 0
@@ -214,7 +248,8 @@ def analyse_instr(
         if(type(node) == op.Add or
             type(node) == op.QAdd):
             add_amount += 1
-    ps_layer_mux_for_add = max(math.ceil(math.log2(add_amount)), 1)
+    ps_layer_mux_for_add = max(math.ceil(math.log2(add_amount)), 1) if(
+        add_in_graph(calculation_graph)) else 0
     
     # # # ps bit width need by add
     ps_bit_width_need_add = ps_calculation_type + \
