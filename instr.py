@@ -53,7 +53,12 @@ instruction in pl
 '''
 
 import math
+from unicodedata import decimal
+
+from add import decimal_to_bin
+import analyser
 import op
+import util
 
 
 def conv_in_graph(calculation_graph):
@@ -475,3 +480,359 @@ def analyse_instr(
         "pl_bit_width_need_for_wb": pl_bit_width_need_wb,
         "pl_bit_width_need": pl_bit_width_need
     }
+
+
+def generate_instruction(
+    calculation_graph,
+    im2col_shape,
+    analyse_result,
+    instr_analyse_result,
+    calc_process,
+    calc_process_with_parallel,
+):
+    '''
+    Generate instructions for instr_set.v
+    '''
+
+    # width of per data
+    data_width = 8
+    c_data_width = 32
+
+    # list fields and bit width of conv, pp, wb instruction
+    instr_width_for_conv = [
+        ("pl_calculation_type", 
+            instr_analyse_result["pl_calculation_type"]),
+        ("pl_mult_side_length_for_conv_exponent", 
+            instr_analyse_result["pl_mult_side_length_for_conv_exponent"]),
+        ("pl_A_left_side_length_for_conv_exponent",
+            instr_analyse_result["pl_A_left_side_length_for_conv_exponent"]),
+        ("pl_B_up_side_length_for_conv_exponent",
+            instr_analyse_result["pl_B_up_side_length_for_conv_exponent"]),
+        ("pl_weight_buffer_read_start_line_for_conv",
+            instr_analyse_result["pl_weight_buffer_read_start_line_for_conv"]),
+        ("pl_feature_map_buffer_read_start_line_for_conv",
+            instr_analyse_result[
+                "pl_feature_map_buffer_read_start_line_for_conv"]),
+        ("pl_output_buffer_store_start_line_for_conv",
+            instr_analyse_result["pl_output_buffer_store_start_line_for_conv"]),
+        ("pl_store_or_accumulate_for_conv",
+            instr_analyse_result["pl_store_or_accumulate_for_conv"]),
+        ("pl_layer_mux_for_conv",
+            instr_analyse_result["pl_layer_mux_for_conv"]),
+    ]
+    pl_bit_width_need_for_conv = instr_analyse_result[
+        "pl_bit_width_need_for_conv"]
+    instr_width_for_pp = [
+        ("pl_calculation_type", 
+            instr_analyse_result["pl_calculation_type"]),
+        ("pl_side_length_for_pp_exponent",
+            instr_analyse_result["pl_side_length_for_pp_exponent"]),
+        ("pl_start_channel_for_pp",
+            instr_analyse_result["pl_start_channel_for_pp"]),
+        ("pl_layer_mux_for_pp",
+            instr_analyse_result["pl_layer_mux_for_pp"]),
+        ("pl_output_buffer_read_start_line_for_pp",
+            instr_analyse_result["pl_output_buffer_read_start_line_for_pp"]),
+        ("pl_process_lines_for_pp",
+            instr_analyse_result["pl_process_lines_for_pp"]),
+        ("pl_activation_for_pp",
+            instr_analyse_result["pl_activation_for_pp"]),
+    ]
+    pl_bit_width_need_for_pp = instr_analyse_result["pl_bit_width_need_for_pp"]
+    instr_width_for_wb = [
+        ("pl_calculation_type", 
+            instr_analyse_result["pl_calculation_type"]),
+        ("pl_write_back_rows_for_wb",
+            instr_analyse_result["pl_write_back_rows_for_wb"]),
+    ]
+    pl_bit_width_need_for_wb = instr_analyse_result["pl_bit_width_need_for_wb"]
+    pl_bit_width_need = instr_analyse_result["pl_bit_width_need"]
+
+    # divide im2col matrix to submatrix
+    divided_border = analyser.cut_im2col_matrix(
+        im2col_shape,
+        calculation_graph,
+        analyse_result["resource_analyse_result"]["max_matrix_len_support"],
+        analyse_result["resource_analyse_result"]["min_matrix_len_support"]
+    )
+    
+    # get submatrix sizes 
+    submatrix_size = analyser.get_submatrix_size(divided_border)
+
+    '''
+    This function only generates instructions for instr_set.v, that is to say:
+    only generate instructions for pl self control calculations, including:
+    conv2d, post_process, write_back.
+    Since the calc instructions in calc_process_with_parallel only appears in
+    the left line, we only need to focus on the left line
+    '''
+    '''
+    The results should includes:
+    1. The instructions in sequence
+    2. The beginning index and the finishing index of each pair, indexing by
+      layer_index and pair_index
+    Caution: According to the current calc process plan rule, it does not 
+    ensure that there must be a `store` just after a `load`, that is to say, 
+    there may be two or more `load` connected
+    '''
+    '''
+    How to generate instructions:
+    0. Get buffer width and depth from analyse_result
+    1. For a submatrix, get its width and height from `submatrix_size`
+    2. Calc the matrix's size, and how many buffer lines it need
+    3. According to the `load` instructions, infer each matrix's store 
+      position, and save these data
+    4. According to sequence that the `C` matrix appeared in the calc 
+      instructions, add `C` matrix into output buffer sequentially, and infer 
+      their position. (Attention: data width of C matrix is 32)
+    5. Generate conv instructions for each `=, +=` action
+    6. Go back and generate pp instructions for each C block
+    7. Generate wb instructions for all `store` actions in a pair. (Maybe 
+      need to check if the `C` matrices are continuously in the buffer)
+    '''
+    resource_analyse_result = analyse_result["resource_analyse_result"]
+    max_len_support = resource_analyse_result["max_matrix_len_support"]
+    bram_group = resource_analyse_result["bram_group"]
+    buffer_A_width = max_len_support if(bram_group == 0) else \
+        max_len_support * bram_group
+    buffer_B_width = max_len_support if(bram_group == 0) else \
+        max_len_support * bram_group
+    bram_col_c_need_per_bram_group = resource_analyse_result[
+        "bram_col_c_need_per_bram_group"]
+    bram_col_c_need = bram_col_c_need_per_bram_group if(bram_group == 0) else \
+        bram_col_c_need_per_bram_group * bram_group
+    buffer_C_width = bram_col_c_need * 64 // c_data_width
+
+    instructions = []       # generated instructions
+    instruction_index = []  # instruction index for each pair
+        # (each item: [(layer_index, pair_index), start_index, end_index])
+    for layer_index, layer in enumerate(calc_process_with_parallel):
+        submatrix_size_current_layer = submatrix_size[layer_index]
+        submatrix_size_A = submatrix_size_current_layer[0]
+        submatrix_size_B = submatrix_size_current_layer[1]
+        # record buffer usage(each item: [block_name, start_line, end_line])
+        buffer_A_usage = []
+        buffer_B_usage = []
+        buffer_C_usage = []
+        # infer the activation type of this layer
+        activation_type = 0
+        current_node = analyser.search_conv2d(calculation_graph, layer_index+1)
+        for node in calculation_graph:
+            if(hasattr(node, "input")):
+                if(node.input == current_node.id):
+                    break
+            elif(hasattr(node, "input1")):
+                if(node.input1 == current_node.id):
+                    break
+            elif(hasattr(node, "input2")):
+                if(node.input1 == current_node.id):
+                    break
+        if(type(node) == op.Relu or 
+            type(node) == op.QRelu):
+            activation_type = 1
+
+        # traverse each layer in the calc_process
+        for pair_index, process_pair in enumerate(layer):
+            # overwrite buffer A and B in each new pair
+            buffer_A_usage = []
+            buffer_B_usage = []
+            # traverse each process_pair in each layer
+            left_line = process_pair[0]
+            right_line = process_pair[1]
+            # since we only generate instructions for pl self control calc, 
+            # we only need to process `load, =, +=, store` series actions.
+            # It should be mentioned that, we do not need to generate 
+            # instructions for `load` action itself(`load` is controlled by 
+            # ps), but since `load` is together with `=, +=`, we need to 
+            # calculate bram usage according to `load` actions.
+            action_need_to_process = False
+            for action_index, action in enumerate(left_line):
+                if(action[0:4] == "load" or
+                    "=" in action or
+                    action[0:5] == "store"):
+                    action_need_to_process = True
+            if(not action_need_to_process):
+                continue
+
+            # judge the type of the action group(`load, =` or `store`)
+            action_type = None
+            for action_index, action in enumerate(left_line):
+                if(action[0:4] == "load" or 
+                    "=" in action):
+                    action_type = "load_calc"
+                if(action[0:5] == "store"):
+                    action_type = "store"
+            
+            def find_in_buffer_usage(buffer_usage, matrix):
+                '''
+                Find the matrix in the buffer_usage list
+                '''
+                for item in buffer_usage:
+                    if(item[0] == matrix):
+                        return item
+                    
+            # now process `load, =, +=, store`
+            if(action_type == "load_calc"):
+                for action_index, action in enumerate(left_line):
+                    # allocate space for matrices in buffer
+                    if("load" in action):
+                        block = action.split(" ")[1]
+                        matrix = block.split("_")[0]
+                        row = int(block.split("_")[1])
+                        col = int(block.split("_")[2])
+                        if(matrix == "A"):
+                            shape = submatrix_size_A[row][col]
+                            size = shape[0] * shape[1]
+                            buffer_line_need = size // buffer_A_width
+                            start_line = 0
+                            if(len(buffer_A_usage) > 0):
+                                start_line = buffer_A_usage[-1][2] + 1
+                            end_line = start_line + buffer_line_need - 1
+                            buffer_A_usage.append([
+                                block, start_line, end_line, shape
+                            ])
+                        elif(matrix == "B"):
+                            shape = submatrix_size_B[row][col]
+                            size = shape[0] * shape[1]
+                            buffer_line_need = size // buffer_B_width
+                            start_line = 0
+                            if(len(buffer_B_usage) > 0):
+                                start_line = buffer_B_usage[-1][2] + 1
+                            end_line = start_line + buffer_line_need - 1
+                            buffer_B_usage.append([
+                                block, start_line, end_line, shape
+                            ])
+                        else:
+                            raise TypeError("Unsupported matrix type")
+                    elif("=" in action):
+                        block = ""
+                        if("+" in action):
+                            block = action.split("+=")[0]
+                        else:
+                            block = action.split("=")[0]
+                        matrix = block.split("_")[0]
+                        row = int(block.split("_")[1])
+                        col = int(block.split("_")[2])
+                        shape = (submatrix_size_A[row][0][0], 
+                            submatrix_size_B[0][col][1])
+                        size = shape[0] * shape[1]
+                        buffer_line_need = size // buffer_C_width
+                        start_line = 0
+                        if(len(buffer_C_usage) > 0):
+                            start_line = buffer_C_usage[-1][2] + 1
+                        end_line = start_line + buffer_line_need - 1
+                        buffer_C_usage.append([
+                            block, start_line, end_line, shape
+                        ])
+                for action_index, action in enumerate(left_line):
+                    # generate conv instructions for `=, +=`
+                    if(not "=" in action):
+                        continue
+                    save_type = 0
+                    matrix_A = ""
+                    matrix_B = ""
+                    matrix_C = ""
+                    if("+" in action):
+                        save_type = 1
+                        matrix_C = action.split("+=")[0]
+                        matrix_A = action.split("+=")[1].split("*")[0]
+                        matrix_B = action.split("+=")[1].split("*")[1]
+                    else:
+                        save_type = 0
+                        matrix_C = action.split("=")[0]
+                        matrix_A = action.split("=")[1].split("*")[0]
+                        matrix_B = action.split("=")[1].split("*")[1]
+                    C_information = find_in_buffer_usage(
+                        buffer_C_usage, matrix_C)
+                    A_information = find_in_buffer_usage(
+                        buffer_A_usage, matrix_A)
+                    B_information = find_in_buffer_usage(
+                        buffer_B_usage, matrix_B)
+                    instr = ""
+                    instr_value_for_conv = {
+                        "pl_calculation_type": 0,
+                        "pl_mult_side_length_for_conv_exponent": 
+                            math.ceil(math.log2(A_information[3][1])),
+                        "pl_A_left_side_length_for_conv_exponent": 
+                            math.ceil(math.log2(A_information[3][0])),
+                        "pl_B_up_side_length_for_conv_exponent": 
+                            math.ceil(math.log2(B_information[3][1])),
+                        "pl_weight_buffer_read_start_line_for_conv": 
+                            A_information[1],
+                        "pl_feature_map_buffer_read_start_line_for_conv":
+                            B_information[1],
+                        "pl_output_buffer_store_start_line_for_conv":
+                            C_information[1],
+                        "pl_store_or_accumulate_for_conv": save_type,
+                        "pl_layer_mux_for_conv": layer_index,
+                    }
+                    # generate for each field
+                    for pair in instr_width_for_conv:
+                        field = pair[0]
+                        width = pair[1]
+                        instr += decimal_to_bin(instr_value_for_conv[field], 
+                            width)
+                    # completion to 32n bit
+                    instr += decimal_to_bin(0, pl_bit_width_need - 
+                        pl_bit_width_need_for_conv)
+                    instructions.append(instr)
+                C_blocks = []
+                for action_index, action in enumerate(left_line):
+                    # find all C blocks in current process_pair
+                    if(not "=" in action):
+                        continue
+                    matrix_C = ""
+                    if("+" in action):
+                        matrix_C = action.split("+=")[0]
+                    else:
+                        matrix_C = action.split("=")[0]
+                    if(not matrix_C in C_blocks):
+                        C_blocks.append(matrix_C)
+                for block in C_blocks:
+                    # generate pp instruction for each C block in current pair
+                    C_information = find_in_buffer_usage(buffer_C_usage, block)
+                    # infer C block channel according to A block
+                    row = int(block.split("_")[1])
+                    col = int(block.split("_")[2])
+                    start_channel = 0
+                    for i in range(row):
+                        start_channel += submatrix_size_A[i][0][0]
+                    instr = ""
+                    instr_value_for_pp = {
+                        "pl_calculation_type": 1,
+                        "pl_side_length_for_pp_exponent": # up side of C block
+                            math.ceil(math.log2(C_information[3][1])),
+                        "pl_start_channel_for_pp": start_channel,
+                        "pl_layer_mux_for_pp": layer_index,
+                        "pl_output_buffer_read_start_line_for_pp":
+                            C_information[1],
+                        "pl_process_lines_for_pp": 
+                            C_information[2] - C_information[1] + 1,
+                        "pl_activation_for_pp": activation_type,
+                    }
+                    # generate for each field
+                    for pair in instr_width_for_pp:
+                        field = pair[0]
+                        width = pair[1]
+                        instr += decimal_to_bin(instr_value_for_pp[field], 
+                            width)
+                    # completion to 32n bit
+                    instr += decimal_to_bin(0, pl_bit_width_need - 
+                        pl_bit_width_need_for_pp)
+                    instructions.append(instr)
+                # record instructions index of current process_pair
+                start_index = 0
+                if(len(instruction_index) > 0):
+                    start_index = instruction_index[-1][2] + 1
+                instruction_count = len(instructions) - start_index
+                end_index = start_index + instruction_count - 1
+                instruction_index.append([(layer_index, pair_index), 
+                    start_index, end_index])
+                print(instruction_index)
+            elif(action_type == "store"):
+                # TODO: generate wb instructions for `store` actions
+                pass
+            else:
+                raise TypeError("Unsupported action type")
+            print("")
+            exit()

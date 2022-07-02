@@ -309,7 +309,7 @@ def gen_code(
     calculation_graph,
     im2col_shape,
     model_dir,
-    float_mdoel_dir
+    float_model_dir
 ):
     '''
     生成代码
@@ -346,7 +346,7 @@ def gen_code(
     #     divided_border,
     #     submatrix_size,
     #     calc_process,
-    #     float_mdoel_dir
+    #     float_model_dir
     # )
 
     # # 生成cpu整数计算代码
@@ -503,7 +503,13 @@ def gen_code(
         f.write(main_code)
 
     # 生成instrset
-    for i in calc_process_with_parallel:
-        print(i)
+    instr.generate_instruction(
+        calculation_graph=calculation_graph,
+        im2col_shape=im2col_shape,
+        analyse_result=analyse_result,
+        instr_analyse_result=instr_analyse_result,
+        calc_process=calc_process,
+        calc_process_with_parallel=calc_process_with_parallel,
+    )
 
     # 生成c
