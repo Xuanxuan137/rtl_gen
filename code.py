@@ -1,5 +1,6 @@
 
 
+from distutils.debug import DEBUG
 import math
 import op
 import cpu_float
@@ -10,6 +11,7 @@ import post_process
 import add
 import top
 import instr
+import cpu_arm
 
 
 def get_conv_amount(calculation_graph):
@@ -376,7 +378,7 @@ def gen_code(
         ZERO_W=conv_zero_w,
         DEBUG=True
     )
-    with open("output/conv.v", "w") as f:
+    with open("output/fpga_deploy/conv.v", "w") as f:
         f.write(conv_code)
 
     # 生成fc
@@ -407,7 +409,7 @@ def gen_code(
         QMAX=fc_qmax[0],
         DEBUG=True
     )
-    with open("output/fc.v", "w") as f:
+    with open("output/fpga_deploy/fc.v", "w") as f:
         f.write(fc_code)
 
     # 生成post_process
@@ -436,7 +438,7 @@ def gen_code(
         QMAX=conv_qmax[0],
         DEBUG=True
     )
-    with open("output/post_process.v", "w") as f:
+    with open("output/fpga_deploy/post_process.v", "w") as f:
         f.write(pp_code)
 
     # 分析指令各部分需要的位宽
@@ -466,7 +468,7 @@ def gen_code(
             QMIN=add_qmin[0],
             DEUG=True
         )
-        with open("output/add.v", "w") as f:
+        with open("output/fpga_deploy/add.v", "w") as f:
             f.write(add_code)
 
     # 生成main
@@ -499,11 +501,11 @@ def gen_code(
         PP_MUX_WIDTH=pp_mux_width,
         INSTR_ANALYSE_RESULT=instr_analyse_result,
     )
-    with open("output/top.v", "w") as f:
+    with open("output/fpga_deploy/top.v", "w") as f:
         f.write(main_code)
 
-    # 生成instrset
-    instr.generate_instruction(
+    # generate instructions for instrset.v
+    instructions, instruction_index = instr.generate_instruction(
         calculation_graph=calculation_graph,
         im2col_shape=im2col_shape,
         analyse_result=analyse_result,
@@ -511,5 +513,42 @@ def gen_code(
         calc_process=calc_process,
         calc_process_with_parallel=calc_process_with_parallel,
     )
+    
+    # generate instrset
+    instr_width = instr_analyse_result["pl_bit_width_need"]
+    addr_width = math.ceil(math.log2(len(instructions)))
+    instrset_code = instr.generate_instrset(
+        MODULE_NAME="instrset",
+        ADDR_WIDTH=addr_width,
+        INSTR_WIDTH=instr_width,
+        INSTRUCTIONS=instructions,
+        DEBUG=True
+    )
+    with open("output/fpga_deploy/instrset.v", "w") as f:
+        f.write(instrset_code)
 
-    # 生成c
+    # generate c on board
+    cmake_txt, \
+    main_code, \
+    call_lib_h_code, \
+    call_lib_c_code, \
+    fixed_point_h_code, \
+    fixed_point_c_code = cpu_arm.gen_code(
+        calculation_graph=calculation_graph,
+        im2col_shape=im2col_shape,
+        divided_border=divided_border,
+        submatrix_size=submatrix_size,
+        calc_process_with_parallel=calc_process_with_parallel
+    )
+    with open("output/fpga_deploy/CMakelists.txt", "w") as f:
+        f.write(cmake_txt)
+    with open("output/fpga_deploy/main.c", "w") as f:
+        f.write(main_code)
+    with open("output/fpga_deploy/call_lib.h", "w") as f:
+        f.write(call_lib_h_code)
+    with open("output/fpga_deploy/call_lib.c", "w") as f:
+        f.write(call_lib_c_code)
+    with open("output/fpga_deploy/fixed_point.h", "w") as f:
+        f.write(fixed_point_h_code)
+    with open("output/fpga_deploy/fixed_point.c", "w") as f:
+        f.write(fixed_point_c_code)

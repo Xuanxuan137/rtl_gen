@@ -53,6 +53,7 @@ instruction in pl
 '''
 
 import math
+from typing import Type
 from unicodedata import decimal
 
 from add import decimal_to_bin
@@ -828,11 +829,119 @@ def generate_instruction(
                 end_index = start_index + instruction_count - 1
                 instruction_index.append([(layer_index, pair_index), 
                     start_index, end_index])
-                print(instruction_index)
             elif(action_type == "store"):
-                # TODO: generate wb instructions for `store` actions
-                pass
+                # generate wb instructions for `store` actions
+                start_end_lines = []
+                for action_index, action in enumerate(left_line):
+                    if(not "store" in action):
+                        raise TypeError("Unsupported action type")
+                    block = action.split(" ")[1]
+                    information = find_in_buffer_usage(buffer_C_usage, block)
+                    start_line = information[1]
+                    end_line = information[2]
+                    start_end_lines.append((start_line, end_line))
+                # splice the blocks in start_end_lines
+                i = 0
+                j = i + 1
+                while(True):
+                    if(len(start_end_lines) <= 1):
+                        break
+                    if(i == len(start_end_lines)):
+                        break
+                    if(j == len(start_end_lines)):
+                        i += 1
+                        j = 0
+                        continue
+                    block1 = start_end_lines[i]
+                    block2 = start_end_lines[j]
+                    start1 = block1[0]
+                    end1 = block1[1]
+                    start2 = block2[0]
+                    end2 = block2[1]
+                    if(start2 == end1 + 1):
+                        start_end_lines[i] = (start1, end2)
+                        start_end_lines.remove(start_end_lines[j])
+                        i = 0
+                        j = i + 1
+                    else:
+                        j += 1
+                # generate wb instructions for each block in start_end_lines
+                for block in start_end_lines:
+                    instr = ""
+                    instr_value_for_wb = {
+                        "pl_calculation_type": 2,
+                        "pl_write_back_rows_for_wb":
+                            block[1] - block[0],
+                    }
+                    # generate for each field
+                    for pair in instr_width_for_wb:
+                        field = pair[0]
+                        width = pair[1]
+                        instr += decimal_to_bin(instr_value_for_wb[field], 
+                            width)
+                    # completion to 32n bit
+                    instr += decimal_to_bin(0, pl_bit_width_need - 
+                        pl_bit_width_need_for_wb)
+                    instructions.append(instr)
+                # record instructions index of current process_pair
+                start_index = 0
+                if(len(instruction_index) > 0):
+                    start_index = instruction_index[-1][2] + 1
+                instruction_count = len(instructions) - start_index
+                end_index = start_index + instruction_count - 1
+                instruction_index.append([(layer_index, pair_index), 
+                    start_index, end_index])
             else:
                 raise TypeError("Unsupported action type")
-            print("")
-            exit()
+    return instructions, instruction_index
+
+
+def generate_instrset(
+    MODULE_NAME,
+    ADDR_WIDTH,
+    INSTR_WIDTH,
+    INSTRUCTIONS,
+    DEBUG=True,
+):
+    '''
+    Generate instrset.v
+    '''
+
+    # signals need to generate debug probes
+    debug_signals = []
+
+    code = ""
+
+    # generate module
+    code += "module %s(\n"%(MODULE_NAME)
+
+    # generate ports
+    indent = "\t"
+    code += indent + "input clk,\n"
+    code += indent + "input [%d:0] addr,\n"%(ADDR_WIDTH-1)
+    code += indent + "output [%d:0] dout\n"%(INSTR_WIDTH-1)
+    code += ");\n"
+
+    # generate dataset  
+    # TODO: here we round up the depth of dataset to 2**n, instead of the 
+    # TODO: accurate depth, and may cost more LUTRAM(I dont know)
+    code += indent + "reg [%d:0] instruction_set[%d:0];\n"%(INSTR_WIDTH-1,
+        2**math.ceil(math.log2(len(INSTRUCTIONS)))-1)
+
+    # assign dout
+    code += indent + "assign dout = instruction_set[addr];\n"
+
+    # initial instructions
+    code += indent + "initial begin\n"
+    indent = "\t\t"
+    for index, instr in enumerate(INSTRUCTIONS):
+        code += indent + "instruction_set[%d] = %d'b%s;\n"%(index, INSTR_WIDTH,
+            instr)
+
+    indent = "\t"
+    code += indent + "end\n"
+
+
+    code += "endmodule"
+
+    return code

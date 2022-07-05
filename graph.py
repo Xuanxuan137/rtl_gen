@@ -1,6 +1,5 @@
 
 
-from doctest import OutputChecker
 import numpy as np
 import op
 from util import *
