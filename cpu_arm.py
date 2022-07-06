@@ -1,8 +1,5 @@
 
 
-from fileinput import isstdin
-
-from matplotlib import blocking_input
 import op
 import os
 import numpy as np
@@ -731,6 +728,7 @@ def gen_call_lib_h(
     code += "#include \"fixed_point.h\"\n"
 
     code += "typedef unsigned char uint8;\n"
+    code += "typedef unsigned long long int uint64;\n"
     code += "void init();\n"
     code += "void calc(uint8 ** result , uint8 * data);\n"
     code += "int argmax(uint8 * x, int len);\n"
@@ -780,6 +778,151 @@ def declare_pointer_for_weight_blocks(
         code += "uint8 * layer_%d_weight_dma;\n"%(n)
 
     code += "\n\n"
+
+    return code
+
+
+
+def alloc_space_for_weight_blocks(
+    calculation_graph,
+    sub_matrix_size,
+    calc_process_with_parallel
+):
+    '''
+    allocate space for weight blocks
+    '''
+    code = ""
+    # generate for conv2d
+    for layer_index, layer in enumerate(calc_process_with_parallel):
+        block_index = 0
+        for pair_index, pair in enumerate(layer):
+            left_line = pair[0]
+            right_line = pair[1]
+            is_load = False
+            for action_index, action in enumerate(left_line):
+                if(action[0:4] == "load"):
+                    is_load = True
+            if(not is_load):
+                continue
+            node_index = get_node_index(layer_index, calculation_graph)
+            # calc allocate size
+            total_size = 0
+            for action_index, action in enumerate(left_line):
+                if(not action[0:4] == "load"):
+                    continue
+                block = action.split(" ")[1]
+                matrix = block.split("_")[0]
+                row = int(block.split("_")[1])
+                col = int(block.split("_")[2])
+                if(matrix != "A"):
+                    continue
+                shape = sub_matrix_size[layer_index][0][row][col]
+                total_size += shape[0] * shape[1]
+            code += "PYNQ_allocatedSharedMemory(&layer_%d_weight_%d_shared, " \
+                "sizeof(uint8)*%d, 1);\n"%(node_index, block_index, total_size)
+            code += "layer_%d_weight_%d_dma = (uint8*)layer_%d_weight_%d_" \
+                "shared.pointer;\n"%(node_index, block_index, 
+                node_index, block_index)
+            block_index += 1
+    
+    # generate for fc
+    for n, node in enumerate(calculation_graph):
+        if(type(node) != op.QDense):
+            continue
+        code += "PYNQ_allocatedSharedMemory(&layer_%d_weight_shared, sizeof(" \
+            "uint8)*%d, 1);\n"%(n, node.weight.shape[0] * node.weight.shape[1])
+        code += "layer_%d_weight_dma = layer_%d_weight_shared.pointer;\n"%(n, n)
+    
+    code += "\n\n"
+
+    return code
+
+
+
+def im2col_weight(
+    calculation_graph,
+    im2col_shape,
+    sub_matrix_size,
+    calc_process_with_parallel
+):
+    '''
+    copy weight into weight blocks
+    '''
+    code = ""
+    code += "uint8 * weight_y_ptr;\n"
+    code += "uint8 * weight_x_ptr;\n"
+
+    # copy weights
+    for layer_index, layer in enumerate(calc_process_with_parallel):
+        block_index = 0
+        for pair_index, pair in enumerate(layer):
+            left_line = pair[0]
+            right_line = pair[1]
+            is_load = False
+            for action_index, action in enumerate(left_line):
+                if(action[0:4] == "load"):
+                    is_load = True
+            if(not is_load):
+                continue
+            node_index = get_node_index(layer_index, calculation_graph)
+            # get dma block shape
+            #! Do I need to get dma block shape? No! I just need to copy 
+            #! into it contiguously. I just need to record how many bytes
+            #! I have copied.
+            copied_size = 0
+            for action_index, action in enumerate(left_line):
+                # copy by im2col block
+                if(not action[0:4] == "load"):
+                    continue
+                block = action.split(" ")[1]
+                matrix = block.split("_")[0]
+                row = int(block.split("_")[1])
+                col = int(block.split("_")[2])
+                if(matrix != "A"):
+                    continue
+                # get submatrix block shape
+                block_shape = sub_matrix_size[layer_index][0][row][col]
+                # get original im2col block shape(before fit to 2^n)
+                # # calc cut left_up coordinate according to submatrix_size
+                cut_coordinate_row = 0
+                cut_coordinate_col = 0
+                for i in range(row):
+                    cut_coordinate_row += sub_matrix_size[layer_index] \
+                        [0][i][col][0]
+                for i in range(col):
+                    cut_coordinate_col += sub_matrix_size[layer_index] \
+                        [0][row][i][1]
+                # # calc cut right_down coordinate according to submatrix_size
+                cut_coordinate_row_upper = cut_coordinate_row + \
+                    sub_matrix_size[layer_index][0][row][col][0]
+                cut_coordinate_col_upper = cut_coordinate_col + \
+                    sub_matrix_size[layer_index][0][row][col][1]
+                # # get im2col border 
+                row_border = im2col_shape[layer_index][0][0]
+                col_border = im2col_shape[layer_index][0][1]
+                # # calc exceed
+                row_exceed = cut_coordinate_row_upper - row_border
+                col_exceed = cut_coordinate_col_upper - col_border
+                # # original im2col block shape
+                im2col_block_shape = (block_shape[0] - row_exceed,
+                    block_shape[1] - col_exceed)
+                
+                # copy from `im2col_block` to `block`
+                dst_start = copied_size
+                src_start = cut_coordinate_row * col_border + cut_coordinate_col
+                code += '''
+weight_y_ptr = &layer_%d_weight_%d_dma[%d];
+weight_x_ptr = &layer_%d_weight[%d];
+                \n'''%(node_index, block_index, dst_start, node_index, src_start)
+
+                copied_size += block_shape[0] * block_shape[1]
+            block_index += 1
+            # print("\n")
+            # exit()
+
+
+    # free original weights
+
 
     return code
 
@@ -851,6 +994,117 @@ def declare_pointer_for_medium_results(
 
 
 
+def alloc_space_for_medium_results(
+    calculation_graph,
+    im2col_shape,
+    sub_matrix_size,
+    calc_process_with_parallel
+):
+    '''
+    allocate space for medium results
+    '''
+    code = ""
+    for n, node in enumerate(calculation_graph):
+        res_size = 1
+        for s in node.output_shape:
+            res_size *= s
+        code += "layer_%d_res = (uint8*)malloc(sizeof(uint8)*%d);\n"%(
+            n, res_size)
+        if(type(node) == op.QConv2d):
+            # for im2col result, declare contiguous space
+            conv_index = get_conv2d_index(n, calculation_graph)
+            xcol_shape = im2col_shape[conv_index][1]
+            code += "layer_%d_xcol = (uint8*)malloc(sizeof(uint8)*%d);\n"%(
+                n, xcol_shape[0] * xcol_shape[1])
+            # for im2col_dma, declare for each transfer
+            calc_process = calc_process_with_parallel[conv_index]
+            block_index = 0
+            for pair_index, pair in enumerate(calc_process):
+                left_line = pair[0]
+                right_line = pair[1]
+                is_load = False
+                for action_index, action in enumerate(left_line):
+                    if(action[0:4] == "load"):
+                        is_load = True
+                if(not is_load):
+                    continue
+                # calc allocate size
+                total_size = 0
+                for action_index, action in enumerate(left_line):
+                    if(not action[0:4] == "load"):
+                        continue
+                    block = action.split(" ")[1]
+                    matrix = block.split("_")[0]
+                    row = int(block.split("_")[1])
+                    col = int(block.split("_")[2])
+                    if(matrix != "B"):
+                        continue
+                    shape = sub_matrix_size[conv_index][1][row][col]
+                    total_size += shape[0] * shape[1]
+                code += "PYNQ_allocatedSharedMemory(&layer_%d_xcol_%d_shared" \
+                    ", sizeof(uint8)*%d, 1);\n"%(n, block_index, total_size)
+                code += "layer_%d_xcol_%d_dma = (uint8*)layer_%d_xcol_%d_" \
+                    "shared.pointer;\n"%(n, block_index, n, block_index)
+                block_index += 1
+            # for matmul_res, declare for each transfer
+            block_index = 0
+            for pair_index, pair in enumerate(calc_process):
+                left_line = pair[0]
+                right_line = pair[1]
+                is_store = False
+                for action_index, action in enumerate(left_line):
+                    if(action[0:5] == "store"):
+                        is_store = True
+                if(not is_store):
+                    continue
+                total_size = 0
+                for action_index, action in enumerate(left_line):
+                    if(not action[0:5] == "store"):
+                        continue
+                    block = action.split(" ")[1]
+                    matrix = block.split("_")[0]
+                    row = int(block.split("_")[1])
+                    col = int(block.split("_")[2])
+                    shape = (sub_matrix_size[conv_index][0][row][0][0], 
+                        sub_matrix_size[conv_index][1][0][col][1])
+                    total_size += shape[0] * shape[1]
+                code += "PYNQ_allocatedSharedMemory(&layer_%d_matmul_%d_" \
+                    "shared, sizeof(uint8)*%d, 1);\n"%(n, block_index, 
+                    total_size)
+                code += "layer_%d_matmul_%d_dma = (uint8*)layer_%d_matmul_" \
+                    "%d_shared.pointer;\n"%(n, block_index, n, block_index)
+                block_index += 1
+        elif(type(node) == op.QDense):
+            code += "PYNQ_allocatedSharedMemory(&layer_%d_in_shared, sizeof" \
+                "(uint8)*%d, 1);\n"%(n, node.input_channel)
+            code += "layer_%d_in_dma = (uint8*)layer_%d_in_shared.pointer;\n"%(
+                n, n)
+            code += "PYNQ_allocatedSharedMemory(&layer_%d_out_shared, " \
+                "sizeof(uint64)*%d, 1);\n"%(n, node.output_channel)
+            code += "layer_%d_out_dma = (uint64*)layer_%d_out_shared.pointer;" \
+                "\n"%(n, n)
+        elif(type(node) == op.QAdd):
+            total_size = 1
+            for s in node.output_shape:
+                total_size *= s
+            code += "PYNQ_allocatedSharedMemory(&layer_%d_in1_shared, " \
+                "sizeof(uint8)*%d, 1);\n"%(n, s)
+            code += "layer_%d_in1_dma = (uint8*)layer_%d_in1_shared.pointer" \
+                ";\n"%(n, n)
+            code += "PYNQ_allocatedSharedMemory(&layer_%d_in2_shared, " \
+                "sizeof(uint8)*%d, 1);\n"%(n, s)
+            code += "layer_%d_in2_dma = (uint8*)layer_%d_in2_shared.pointer" \
+                ";\n"%(n, n)
+            code += "PYNQ_allocatedSharedMemory(&layer_%d_out_shared, " \
+                "sizeof(uint8)*%d, 1);\n"%(n, s)
+            code += "layer_%d_out_dma = (uint8*)layer_%d_out_shared.pointer" \
+                ";\n"%(n, n)
+    code += "\n\n"
+
+    return code
+
+
+
 def declare_bus():
     '''
     declare dma and bram
@@ -860,6 +1114,100 @@ def declare_bus():
     code += "PYNQ_AXI_DMA dma_r1;\n"
     code += "PYNQ_AXI_DMA dma_w0;\n"
     code += "volatile unsigned int * mmio;\n"
+    code += "\n\n"
+
+    return code
+
+
+
+def generate_init(
+    calculation_graph,
+    im2col_shape,
+    divided_border,
+    sub_matrix_size,
+    calc_process_with_parallel
+):
+    '''
+    Generate init() function of call_lib
+    '''
+    code = ""
+
+    code += "void init()\n"
+    code += "{\n"
+
+    # alloc space for weights
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.QConv2d):
+            code += "layer_%d_weight = (uint8*)malloc(sizeof(uint8)*%d);\n"%(
+                n, node.weight.shape[0] * node.weight.shape[1] * 
+                node.weight.shape[2] * node.weight.shape[3])
+            code += "layer_%d_bias = (int*)malloc(sizeof(int)*%d);\n"%(
+                n, node.bias.shape[0])
+        elif(type(node) == op.QDense):
+            code += "layer_%d_weight = (uint8*)malloc(sizeof(uint8)*%d);\n"%(
+                n, node.weight.shape[0] * node.weight.shape[1])
+            code += "layer_%d_bias = (int*)malloc(sizeof(int)*%d);\n"%(
+                n, node.bias.shape[0])
+    code += "\n\n"
+
+    # read weights into memory
+    code += "FILE * f;\n"
+    code += "int l;\n"
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.QConv2d):
+            code += "f = fopen(\"../weight/layer_%d_weight.bin\", \"rb\");\n"%(
+                n)
+            code += "l = fread(layer_%d_weight, sizeof(uint8), %d, f);\n"%(
+                n, node.weight.shape[0] * node.weight.shape[1] * 
+                node.weight.shape[2] * node.weight.shape[3])
+            code += "assert(l == %d);\n"%(
+                node.weight.shape[0] * node.weight.shape[1] * 
+                node.weight.shape[2] * node.weight.shape[3])
+            code += "fclose(f);\n"
+            code += "f = fopen(\"../weight/layer_%d_bias.bin\", \"rb\");\n"%(n)
+            code += "l = fread(layer_%d_bias, sizeof(int), %d, f);\n"%(
+                n, node.bias.shape[0])
+            code += "assert(l == %d);\n"%(node.bias.shape[0])
+            code += "fclose(f);\n"
+        elif(type(node) == op.QDense):
+            code += "f = fopen(\"../weight/layer_%d_weight.bin\", \"rb\");\n"%(
+                n)
+            code += "l = fread(layer_%d_weight, sizeof(uint8), %d, f);\n"%(
+                n, node.weight.shape[0] * node.weight.shape[1])
+            code += "assert(l == %d);\n"%(
+                node.weight.shape[0] * node.weight.shape[1])
+            code += "fclose(f);\n"
+            code += "f = fopen(\"../weight/layer_%d_bias.bin\", \"rb\");\n"%(n)
+            code += "l = fread(layer_%d_bias, sizeof(int), %d, f);\n"%(
+                n, node.bias.shape[0])
+            code += "assert(l == %d);\n"%(node.bias.shape[0])
+            code += "fclose(f);\n"
+    
+    # alloc space for weight blocks
+    code += alloc_space_for_weight_blocks(
+        calculation_graph,
+        sub_matrix_size,
+        calc_process_with_parallel
+    )
+
+    # alloc space for medium results
+    code += alloc_space_for_medium_results(
+        calculation_graph,
+        im2col_shape,
+        sub_matrix_size,
+        calc_process_with_parallel
+    )
+
+    # copy weight into block weights
+    code += im2col_weight(
+        calculation_graph,
+        im2col_shape,
+        sub_matrix_size,
+        calc_process_with_parallel
+    )
+
+
+    code += "}\n"
     code += "\n\n"
 
     return code
@@ -913,7 +1261,13 @@ def gen_call_lib_c(
     code += declare_bus()
 
     # init
-    # TODO
+    code += generate_init(
+        calculation_graph,
+        im2col_shape,
+        divided_border,
+        sub_matrix_size,
+        calc_process_with_parallel
+    )
     
 
     return code

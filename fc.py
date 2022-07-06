@@ -261,14 +261,14 @@ def gen_fc(
     code += indent + "wire signed [95:0] fp_temp_mult_coe_temp;\n"
     code += indent + "assign fp_temp_mult_coe_temp = fp_temp * coe;\n"
 
-    # 生成rshfit
+    # 生成rshift
     code += indent + "reg [4:0] rshift;\n"
     code += indent + "always @(*) begin\n"
     indent = "\t\t"
     code += indent + "case(mux)\n"
     for i in range(len(COE)):
         indent = "\t\t\t"
-        code += indent + "%d'b%s: rshift = rshfit%d;\n"%(
+        code += indent + "%d'b%s: rshift = rshift%d;\n"%(
             MUX_WIDTH, decimal_to_binary(i, MUX_WIDTH), i)
     code += indent + "default: rshift = 0;\n"
     indent = "\t\t"
