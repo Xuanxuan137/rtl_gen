@@ -1,8 +1,64 @@
 
 
+import math
+
 import op
 import os
 import numpy as np
+
+
+
+def decimal_to_bin(value, width):
+    '''
+    transfer decimal value to binary with 'width' width
+    '''
+    if(value < 0):
+        raise ValueError("value should be non-negative")
+    code = ""
+    for i in range(width):
+        if(value >= 2**(width-1-i)):
+            code += "1"
+            value -= 2**(width-1-i)
+        else:
+            code += "0"
+    return code
+
+
+
+def bin_to_hex(bin):
+    '''
+    convert binary to hex
+    '''
+    table = {
+        "0000": "0",
+        "0001": "1",
+        "0010": "2",
+        "0011": "3",
+        "0100": "4",
+        "0101": "5",
+        "0110": "6",
+        "0111": "7",
+        "1000": "8",
+        "1001": "9",
+        "1010": "A",
+        "1011": "B",
+        "1100": "C",
+        "1101": "D",
+        "1110": "E",
+        "1111": "F",
+    }
+
+    while(len(bin) < math.ceil(len(bin)/4)*4):
+        bin = "0" + bin
+    
+    code = ""
+    section = len(bin) // 4
+    
+    for i in range(section):
+        part = bin[i*4 : i*4+4]
+        code += table[part]
+    
+    return code
 
 
 
@@ -339,6 +395,34 @@ void qim2col(uint8 * data_col, uint8 * data_im, int height, int width, int chann
                     data_col[row_offset + w] = data_im[srow_offset + w_pad];
                 else {
                     data_col[row_offset + w] = zero;
+                }
+            }
+        }
+    }
+}
+
+void qim2row(uint8 * data_col, uint8 * data_im, int height, int width, int channels_col,
+             int height_col, int width_col, int kernel_h, int kernel_w, int stride_h, int stride_w,
+             int pad_h, int pad_w, int dilation_h, int dilation_w, int zero)
+{
+    for (int c = 0; c < channels_col; ++c) {
+        int w_offset = c % kernel_w;
+        int h_offset = (c / kernel_w) % kernel_h;
+        int c_im = c / kernel_h / kernel_w;
+
+        const int hc0 = h_offset * dilation_h - pad_h;
+        const int wc0 = w_offset * dilation_w - pad_w; 
+        for (int h = 0; h < height_col; ++h) { 
+            int h_pad = h * stride_h + hc0;
+
+            const int row_offset = h * width_col;
+            const int srow_offset = (c_im * height + h_pad) * width;
+            for (int w = 0; w < width_col; ++w) {
+                int w_pad = w * stride_w + wc0;
+                if ((((unsigned)h_pad) < ((unsigned)height)) && (((unsigned)w_pad) < ((unsigned)width)))
+                    data_col[c + (row_offset + w) * channels_col] = data_im[srow_offset + w_pad];
+                else {
+                    data_col[c + (row_offset + w) * channels_col] = zero;
                 }
             }
         }
@@ -852,7 +936,7 @@ def im2col_weight(
     code += "uint8 * weight_y_ptr;\n"
     code += "uint8 * weight_x_ptr;\n"
 
-    # copy weights
+    # copy conv weights
     for layer_index, layer in enumerate(calc_process_with_parallel):
         block_index = 0
         for pair_index, pair in enumerate(layer):
@@ -901,8 +985,8 @@ def im2col_weight(
                 row_border = im2col_shape[layer_index][0][0]
                 col_border = im2col_shape[layer_index][0][1]
                 # # calc exceed
-                row_exceed = cut_coordinate_row_upper - row_border
-                col_exceed = cut_coordinate_col_upper - col_border
+                row_exceed = max(cut_coordinate_row_upper - row_border, 0)
+                col_exceed = max(cut_coordinate_col_upper - col_border, 0)
                 # # original im2col block shape
                 im2col_block_shape = (block_shape[0] - row_exceed,
                     block_shape[1] - col_exceed)
@@ -911,17 +995,75 @@ def im2col_weight(
                 dst_start = copied_size
                 src_start = cut_coordinate_row * col_border + cut_coordinate_col
                 code += '''
+// copy layer_%d: %s
 weight_y_ptr = &layer_%d_weight_%d_dma[%d];
 weight_x_ptr = &layer_%d_weight[%d];
-                \n'''%(node_index, block_index, dst_start, node_index, src_start)
+for(int h = 0; h<%d; h++) {
+    memcpy(weight_y_ptr, weight_x_ptr, sizeof(uint8)*%d);
+    weight_y_ptr += %d;
+    weight_x_ptr += %d;
+'''%(
+                    node_index, block,
+                    node_index, block_index, dst_start, 
+                    node_index, src_start,
+                    im2col_block_shape[0],
+                    im2col_block_shape[1],
+                    im2col_block_shape[1],
+                    col_border,
+                )
+                if(col_exceed > 0):
+                    code += '''
+    for(int t = 0; t<%d; t++) {
+        weight_y_ptr[t] = %d;
+    }
+    weight_y_ptr += %d;
+'''%(
+                    col_exceed,
+                    calculation_graph[node_index].zero_w,
+                    col_exceed,
+                )
+                code += "}\n"
+                if(row_exceed > 0):
+                    code += '''
+for(int h = 0; h<%d; h++) {
+    memset(weight_y_ptr, %d, sizeof(uint8)*%d);
+    weight_y_ptr += %d;
+}
+'''%(
+                    row_exceed,
+                    calculation_graph[node_index].zero_w, block_shape[1],
+                    block_shape[1],
+                )   
 
                 copied_size += block_shape[0] * block_shape[1]
             block_index += 1
-            # print("\n")
-            # exit()
+    
+
+    # copy fc weights
+    for n, node in enumerate(calculation_graph):
+        if(type(node) != op.QDense):
+            continue
+        code += '''
+// copy layer %d: transepose fc weight
+for(int oc = 0; oc < %d; oc++) {
+    for(int ic = 0; ic < %d; ic++) {
+        layer_%d_weight_dma[oc*%d+ic] = layer_%d_weight[ic*%d+oc];
+    }
+}
+'''%(
+            n, 
+            node.output_channel,
+            node.input_channel,
+            n, node.input_channel, n, node.output_channel
+        )   
 
 
     # free original weights
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.QConv2d or 
+            type(node) == op.QDense):
+            code += "free(layer_%d_weight);\n"%(n)
+            code += "free(layer_%d_bias);\n"%(n)
 
 
     return code
@@ -1105,16 +1247,62 @@ def alloc_space_for_medium_results(
 
 
 
-def declare_bus():
+def declare_bus(
+    BRAM_CTRL_0,
+    AXI_DMA_R0,
+    AXI_DMA_R1,
+    AXI_DMA_W0,
+):
     '''
     declare dma and bram
     '''
+
     code = ""
+
+    # declare address
+    code += "#define BRAM_CTRL_0 %s\n"%(BRAM_CTRL_0)
+    code += "#define AXI_DMA_R0 %s\n"%(AXI_DMA_R0)
+    code += "#define AXI_DMA_R1 %s\n"%(AXI_DMA_R1)
+    code += "#define AXI_DMA_W0 %s\n"%(AXI_DMA_W0)
+
     code += "PYNQ_AXI_DMA dma_r0;\n"
     code += "PYNQ_AXI_DMA dma_r1;\n"
     code += "PYNQ_AXI_DMA dma_w0;\n"
     code += "volatile unsigned int * mmio;\n"
     code += "\n\n"
+
+    return code
+
+
+
+def open_bus():
+    '''
+    open dma and bram
+    '''
+    code = ""
+
+    # open dma
+    code += '''
+PYNQ_openDMA(&dma_r0, AXI_DMA_R0);
+PYNQ_openDMA(&dma_r1, AXI_DMA_R1);
+PYNQ_openDMA(&dma_w0, AXI_DMA_W0);    
+printf("open dma finished\\n");
+'''
+
+    # open bram
+    code += '''
+int fd = open("/dev/mem", O_RDWR|O_SYNC);
+if(fd == -1) {
+    printf("open /dev/mem error\\n"); 
+    exit(-1);
+}
+mmio = mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, fd, BRAM_CTRL_0);
+if(mmio == 0) {
+    printf("mmap failed\\n"); 
+    exit(-1);
+}
+printf("open bram finished\\n");     
+'''
 
     return code
 
@@ -1206,9 +1394,1168 @@ def generate_init(
         calc_process_with_parallel
     )
 
+    # open dma and bram
+    code += open_bus()
+
 
     code += "}\n"
     code += "\n\n"
+
+    return code
+
+
+
+def gen_QInput(n, calculation_graph):
+    '''
+    generate Input
+    '''
+    code = ""
+    node = calculation_graph[n]
+    length = 1
+    for i in node.output_shape:
+        length *= i
+    code += "// layer %d: %s\n"%(n, node)
+    code += "qinput(layer_%d_res, data, %d);\n"%(
+        n, length
+    )
+    code += "\n\n"
+
+    return code
+
+
+
+def gen_copy(
+    n, # node index
+    calculation_graph,
+    im2col_shape,
+    divided_border,
+    sub_matrix_size,
+    calc_process_with_parallel,
+    pair_index,
+    part
+):
+    '''
+    generate code for copy action
+    How to copy B?
+    Now we use im2row to get a cache friendly im2col result.
+    For im2row result, the left side length is `height_col * width*col`,
+    the up side length is `channel * kernel_h * kernel_w`,
+    in other words, it is the transpose of im2col result.
+
+    Since we designed in im2col, but use im2row actually, so some data
+    should be process specially
+    '''
+
+    def get_block_index(
+        n,
+        calculation_graph,
+        calc_process_with_parallel,
+        current_pair_index,
+        part,
+        type
+    ):
+        '''
+        Get dma shared block index(this function should be called by gen_copy)
+        '''
+        conv_index = get_conv2d_index(n, calculation_graph)
+        calc_process = calc_process_with_parallel[conv_index]
+        action_group = calc_process[current_pair_index][part]
+        matrices = []
+        for action in action_group:
+            target = action.split(" ")[1]
+            matrices.append(target)
+
+        if(type == "load"):
+            block_index = 0
+            for pair_index, pair in enumerate(calc_process):
+                left_line = pair[0]
+                right_line = pair[1]
+                if(pair_index < current_pair_index):
+                    continue
+                is_load = False
+                for action_index, action in enumerate(left_line):
+                    if(action[0:4] == "load"):
+                        is_load = True
+                if(not is_load):
+                    continue
+                matrices_in_load = []
+                for action_index, action in enumerate(left_line):
+                    if(action[0:4] != "load"):
+                        continue
+                    target = action.split(" ")[1]
+                    matrices_in_load.append(target)
+                if(matrices == matrices_in_load):
+                    return block_index
+                block_index += 1
+        elif(type == "store"):
+            block_index = 0
+            pair_index = current_pair_index
+            while(pair_index >= 0):
+                pair = calc_process[pair_index]
+                pair_index -= 1
+                left_line = pair[0]
+                right_line = pair[1]
+                is_store = False
+                for action_index, action in enumerate(left_line):
+                    if(action[0:5] == "store"):
+                        is_store = True
+                if(not is_store):
+                    continue
+                matrices_in_store = []
+                for action_index, action in enumerate(left_line):
+                    if(action[0:5] != "store"):
+                        continue
+                    target = action.split(" ")[1]
+                    matrices_in_store.append(target)
+                if(matrices == matrices_in_store):
+                    return block_index
+                block_index += 1
+
+    code = ""
+    
+    node = calculation_graph[n]
+    conv_index = get_conv2d_index(n, calculation_graph)
+    
+    calc_process = calc_process_with_parallel[conv_index]
+    calc_process_pair = calc_process[pair_index]
+    action_group = calc_process_pair[part]
+    submatrix_size_A = sub_matrix_size[conv_index][0]
+    submatrix_size_B = sub_matrix_size[conv_index][1]
+    # calc submatrix_size_C
+    block_count_row_A = len(submatrix_size_A)
+    block_count_col_A = len(submatrix_size_A[0])
+    block_count_row_B = len(submatrix_size_B)
+    block_count_col_B = len(submatrix_size_B[0])
+    submatrix_size_C = []
+    for row in range(block_count_row_A):
+        submatrix_size_C.append([])
+        for col in range(block_count_col_B):
+            submatrix_size_C[row].append((
+                submatrix_size_A[row][0][0],
+                submatrix_size_B[0][col][1]
+            ))
+    
+    copied_size = 0 # the size of data which has copied into dma_shared_memory
+    for action_index, action in enumerate(action_group):
+        block = action.split(" ")[1]
+        matrix = block.split("_")[0]
+        row = int(block.split("_")[1])
+        col = int(block.split("_")[2])
+        
+        if(matrix == "A"):
+            # weight is copied in init()
+            continue
+        elif(matrix == "B"):
+            # copy feature map now
+            # 1. find the left up point of the block in im2col matrix
+            start_row = 0
+            for r in range(row):
+                start_row += submatrix_size_B[r][col][0]
+            start_col = 0
+            for c in range(col):
+                start_col += submatrix_size_B[row][c][1]
+            # 2. find the right down point of the block in im2col matrix
+            # (fit to 2^n)
+            end_row = start_row + submatrix_size_B[row][col][0]
+            end_col = start_col + submatrix_size_B[row][col][1]
+            # 3. find the true right down point(without fit to 2^n)
+            row_upper_bound = im2col_shape[conv_index][1][0]
+            col_upper_bound = im2col_shape[conv_index][1][1]
+            end_row_real = min(end_row, row_upper_bound)
+            end_col_real = min(end_col, col_upper_bound)
+            # 4. calc the exceed length
+            row_exceed = max(end_row - end_row_real, 0)
+            col_exceed = max(end_col - end_col_real, 0)
+            # 5. get start_coordinate in im2row result
+            start_coordinate = (start_col, start_row)
+            # 6. get start_address in dma_shared_memory
+            start_address_dma = copied_size
+            # 7. update copied size
+            current_copy_size = submatrix_size_B[row][col][0] * \
+                submatrix_size_B[row][col][1]
+            copied_size += current_copy_size
+            # 8. get im2row shape
+            im2row_shape = (im2col_shape[conv_index][1][1], 
+                im2col_shape[conv_index][1][0])
+            # 9. get start_address in im2row result
+            start_address_xcol = start_coordinate[0] * im2row_shape[1] + \
+                start_coordinate[1]
+            # 10. get actually copy control data in im2row(not in im2col now)
+            copy_rows = end_col_real - start_col
+            copy_data_each_row = end_row_real - start_row
+            dma_increament = submatrix_size_B[row][col][0]
+            xcol_increament = im2row_shape[1]
+            # 11. get dma shared block number
+            block_index = get_block_index(
+                n,
+                calculation_graph,
+                calc_process_with_parallel,
+                pair_index,
+                part,
+                "load"
+            )
+            # 12. generate copy code
+            code += """
+// // copy %s
+dst_ptr_uint8 = &layer_%d_xcol_%d_dma[%d];
+src_ptr_uint8 = &layer_%d_xcol[%d];
+for(int h = 0; h<%d; h++) {
+    memcpy(dst_ptr_uint8, src_ptr_uint8, sizeof(uint8)*%d);
+    dst_ptr_uint8 += %d;
+    src_ptr_uint8 += %d;
+}
+            \n"""%(
+                block, 
+                n, block_index, start_address_dma,
+                n, start_address_xcol,
+                copy_rows,
+                copy_data_each_row,
+                dma_increament,
+                xcol_increament
+            )
+            code += "\n"
+        elif(matrix == "C"):
+            # copy result now
+            # 1. find the left up point of the block in im2col matrix
+            start_row = 0
+            for r in range(row):
+                start_row += submatrix_size_C[r][col][0]
+            start_col = 0
+            for c in range(col):
+                start_col += submatrix_size_C[row][c][1]
+            # 2. find the right down point of the block in im2col matrix
+            # (fit to 2^n)
+            end_row = start_row + submatrix_size_C[row][col][0]
+            end_col = start_col + submatrix_size_C[row][col][1]
+            # 3. find the true right down point(without fit to 2^n)
+            row_upper_bound = im2col_shape[conv_index][0][0]
+            col_upper_bound = im2col_shape[conv_index][1][1]
+            end_row_real = min(end_row, row_upper_bound)
+            end_col_real = min(end_col, col_upper_bound)
+            # 4. calc the exceed length
+            row_exceed = max(end_row - end_row_real, 0)
+            col_exceed = max(end_col - end_col_real, 0)
+            # 5. get start_coordinate in result matrix
+            start_coordinate = (start_row, start_col)
+            # 6. get start_address in dma_shared_memory
+            start_address_dma = copied_size
+            # 7. update copied size
+            current_copy_size = submatrix_size_C[row][col][0] * \
+                submatrix_size_C[row][col][1]
+            copied_size += current_copy_size
+            # 8. get result_matrix shape
+            result_shape = (im2col_shape[conv_index][0][0], 
+                im2col_shape[conv_index][1][1])
+            # 9. get start_address in result matrix
+            start_address_result = start_coordinate[0] * result_shape[1] + \
+                start_coordinate[1]
+            # 10. get actually copy control data in matmul_res
+            copy_rows = end_row_real - start_row
+            copy_data_each_row = end_col_real - start_col
+            dma_increament = submatrix_size_C[row][col][1]
+            result_increament = result_shape[1]
+            # 11. get dma shared block number
+            block_index = get_block_index(
+                n,
+                calculation_graph,
+                calc_process_with_parallel,
+                pair_index,
+                part,
+                "store"
+            )
+            # 12. generate copy code
+            code += """
+// // copy %s
+dst_ptr_uint8 = &layer_%d_res[%d];
+src_ptr_uint8 = &layer_%d_matmul_%d_dma[%d];
+for(int h = 0; h < %d; h++) {
+    memcpy(dst_ptr_uint8, src_ptr_uint8, sizeof(uint8)*%d);
+    dst_ptr_uint8 += %d;
+    src_ptr_uint8 += %d;
+}
+            \n"""%(
+                block,
+                n, start_address_result,
+                n, block_index, start_address_dma,
+                copy_rows,
+                copy_data_each_row,
+                result_increament,
+                dma_increament
+            )
+        else:
+            raise ValueError("Unknown matrix block")
+
+    return code
+
+
+
+def gen_set_dma(
+    n, 
+    calculation_graph,
+    im2col_shape,
+    divided_border,
+    sub_matrix_size,
+    calc_process_with_parallel,
+    instr_analyse_result,
+    resource_analyse_result,
+    instruction_index,
+    pair_index,
+    part
+):
+    '''
+    Generate code for set_dma action
+    '''
+    code = ""
+
+    def get_block_index(
+        n,
+        calculation_graph,
+        calc_process_with_parallel,
+        current_pair_index,
+        part,
+        type
+    ):
+        '''
+        Get dma shared block index(this should be called by set_dma)
+        '''
+        node = calculation_graph[n]
+        conv_index = get_conv2d_index(n, calculation_graph)
+        calc_process = calc_process_with_parallel[conv_index]
+        calc_process_pair = calc_process[current_pair_index]
+        action_group = calc_process_pair[part]
+        
+        block_index = 0
+        if(type == "load"):
+            for pair_index, pair in enumerate(calc_process):
+                if(pair_index >= current_pair_index):
+                    break
+                left_line = pair[0]
+                right_line = pair[1]
+                if(left_line[0][0:4] == "load"):
+                    block_index += 1
+            return block_index
+        elif(type == "store"):
+            for pair_index, pair in enumerate(calc_process):
+                if(pair_index >= current_pair_index):
+                    break
+                left_line = pair[0]
+                right_line = pair[1]
+                if(left_line[0][0:5] == "store"):
+                    block_index += 1
+            return block_index
+        else:
+            raise TypeError("Unknown transmission type")
+
+    
+    node = calculation_graph[n]
+    conv_index = get_conv2d_index(n, calculation_graph)
+    
+    calc_process = calc_process_with_parallel[conv_index]
+    calc_process_pair = calc_process[pair_index]
+    action_group = calc_process_pair[part]
+
+    if(len(action_group) != 1):
+        raise ValueError("There should be only 1 set_dma instruction in" \
+            "its group")
+    
+    direction = action_group[0].split(" ")[1]
+    
+    # Since the matrices need to transfer through dma is recorded in next
+    # calc_process_pair, we should read it
+    calc_process_pair = calc_process[pair_index + 1]
+    # Since the load and calc actions are always in left_line, read it
+    action_group = calc_process_pair[0]
+
+    submatrix_size_A = sub_matrix_size[conv_index][0]
+    submatrix_size_B = sub_matrix_size[conv_index][1]
+    
+    if(direction == "load"):
+        matrix_A = []   # matrix A's that need to be transferred
+        matrix_B = []   # matrix B's that need to be transferred
+        for action_index, action in enumerate(action_group):
+            if(action[0:4] == "load"):
+                target = action.split(" ")[1]
+                matrix = target.split("_")[0]
+                if(matrix == "A"):
+                    matrix_A.append(target)
+                elif(matrix == "B"):
+                    matrix_B.append(target)
+                else:
+                    raise TypeError("Unknown matrix name")
+        # calc data size of A that need to be transferred
+        total_size_A = 0
+        for block in matrix_A:
+            row = int(block.split("_")[1])
+            col = int(block.split("_")[2])
+            shape = submatrix_size_A[row][col]
+            size = shape[0] * shape[1]
+            total_size_A += size
+        # calc data size of B that need to be transferred
+        total_size_B = 0
+        for block in matrix_B:
+            row = int(block.split("_")[1])
+            col = int(block.split("_")[2])
+            shape = submatrix_size_B[row][col]
+            size = shape[0] * shape[1]
+            total_size_B += size
+        # get the amount of data that each line of bram can hold
+        max_len_support = resource_analyse_result["max_matrix_len_support"]
+        bram_group = resource_analyse_result["bram_group"]
+        data_per_line = max_len_support if(bram_group == 0) else \
+            max_len_support * bram_group
+        # set calculation type(0 for conv)
+        calculation_type = 0
+        # calc bram lines need by A and B
+        bram_line_A_need = total_size_A // data_per_line
+        bram_line_B_need = total_size_B // data_per_line
+        if(total_size_A % data_per_line != 0 or 
+            total_size_B % data_per_line != 0):
+            raise ValueError("data should fill a bram line completly")
+        # get pl instruction begin and end address
+        begin_address = 0
+        end_address = 0
+        for item in instruction_index:
+            if(conv_index == item[0][0] and 
+                pair_index+1 == item[0][1]):
+                begin_address = item[1]
+                end_address = item[2]
+                break
+        # get ps instruction width
+        ps_bit_width_need_for_conv = instr_analyse_result[
+            "ps_bit_width_need_for_conv"]
+        ps_bit_width_need = instr_analyse_result["ps_bit_width_need"]
+        # list instruction fields(each item: (width, value))
+        # because of the design of top.v, the end_address write into 
+        # ps_instruction should be `end_address+1`
+        instruction_fields = [
+            (instr_analyse_result["ps_calculation_type"],
+                calculation_type),
+            (instr_analyse_result["ps_weight_data_length_for_conv"],
+                bram_line_A_need),
+            (instr_analyse_result["ps_feature_map_data_length_for_conv"],
+                bram_line_B_need),
+            (instr_analyse_result["ps_instr_begin_addr_for_conv"],
+                begin_address),
+            (instr_analyse_result["ps_instr_end_addr_for_conv"],
+                end_address + 1),
+            (ps_bit_width_need - ps_bit_width_need_for_conv, 0)
+        ]
+        # generate binary instruction code
+        instruction_code = ""
+        for item in instruction_fields:
+            instruction_code += decimal_to_bin(item[1], item[0])
+        # generate hexadecimal instruction code
+        instruction_code = bin_to_hex(instruction_code)
+        # divide into 32bit per word
+        words = []
+        for i in range(ps_bit_width_need // 32):
+            words.append(instruction_code[i*8 : i*8+8])
+        # get block index
+        block_index = get_block_index(
+            n,
+            calculation_graph,
+            calc_process_with_parallel,
+            pair_index,
+            part,
+            "load"
+        )
+        # generate code
+        code += "// // set_dma\n"
+        for count, word in enumerate(words):
+            code += "mmio[%d] = 0x%s;\n"%(count, word)
+        code += "mmio[%d] = 0xFFFFFFFF;\n"%(count+1)
+        code += """
+PYNQ_writeDMA(&dma_r0, &layer_%d_weight_%d_shared, 0, sizeof(uint8)*%d);
+PYNQ_writeDMA(&dma_r1, &layer_%d_xcol_%d_shared, 0, sizeof(uint8)*%d);
+PYNQ_waitForDMAComplete(&dma_r0, AXI_DMA_WRITE);   
+PYNQ_waitForDMAComplete(&dma_r1, AXI_DMA_WRITE);
+        \n"""%(
+            n, block_index, total_size_A,
+            n, block_index, total_size_B, 
+        )
+    elif(direction == "store"):
+        matrix_C = []
+        for action_index, action in enumerate(action_group):
+            if(action[0:5] == "store"):
+                target = action.split(" ")[1]
+                matrix = target.split("_")[0]
+                if(matrix == "C"):
+                    matrix_C.append(target)
+                else:
+                    raise TypeError("Unknown matrix name")
+        # calc data size of C that need to be transferred
+        total_size_C = 0
+        for block in matrix_C:
+            row = int(block.split("_")[1])
+            col = int(block.split("_")[2])
+            shape = (submatrix_size_A[row][0][0], 
+                submatrix_size_B[0][col][1])
+            size = shape[0] * shape[1]
+            total_size_C += size
+        # get block index
+        block_index = get_block_index(
+            n,
+            calculation_graph,
+            calc_process_with_parallel,
+            pair_index,
+            part,
+            "store"
+        )
+        # generate code
+        code += """
+// // set_dma
+PYNQ_readDMA(&dma_w0, &layer_%d_matmul_%d_dma, 0, sizeof(uint8)*%d);
+PYNQ_waitForDMAComplete(&dma_w0, AXI_DMA_READ);
+        \n"""%(
+            n, block_index, total_size_C
+        )
+    else:
+        raise ValueError("Unknown set_dma direction")
+
+    return code
+
+
+
+def gen_load(
+    n, 
+    calculation_graph,
+    im2col_shape,
+    divided_border,
+    sub_matrix_size,
+    calc_process_with_parallel,
+    pair_index,
+    part
+):
+    '''
+    Generate code for load and calc action
+    Since the load action is actually finished by `set_dma`, 
+    and the calc action is done by fpga automatically,
+    this part do not need to generate code
+    '''
+    code = ""
+
+
+    return code
+
+
+
+def gen_store(
+    n, 
+    calculation_graph,
+    im2col_shape,
+    divided_border,
+    sub_matrix_size,
+    calc_process_with_parallel,
+    pair_index,
+    part
+):
+    '''
+    Generate code for store action
+    Since the store action is actually finished by `set_dma`,
+    and the calc action is done by fpga automatically,
+    this part do not need to generate code
+    '''
+    code = ""
+
+
+    return code
+
+
+
+def gen_QConv2d(
+    n, 
+    calculation_graph,
+    im2col_shape,
+    divided_border,
+    sub_matrix_size,
+    calc_process_with_parallel,
+    instr_analyse_result,
+    resource_analyse_result,
+    instruction_index,
+):
+    '''
+    generate conv2d
+    '''
+    code = ""
+    node = calculation_graph[n]
+    input_id = node.input
+    input_node = calculation_graph[input_id]
+    code += "// layer %d: %s\n"%(n, node)
+
+    # im2row
+    code += "// // im2row\n"
+    code += "channels_col = %d * %d * %d;\n"%(
+                input_node.output_shape[1],
+                node.weight.shape[2], node.weight.shape[3])
+    code += "dil_kernel_h = (%d - 1) * %d + 1;\n"%(
+                node.weight.shape[2], node.dilation[0])
+    code += "dil_kernel_w = (%d - 1) * %d + 1;\n"%(
+        node.weight.shape[3], node.dilation[1])
+    code += "height_col = (%d + 2 * %d - dil_kernel_h) / %d + 1;\n"%(
+        input_node.output_shape[2], 
+        node.padding[0], node.stride[0])
+    code += "width_col = (%d + 2 * %d - dil_kernel_w) / %d + 1;\n"%(
+        input_node.output_shape[3],
+        node.padding[1], node.stride[1])
+    code += "qim2row(layer_%d_xcol, layer_%d_res, %d, %d, channels_col, " \
+        "height_col, width_col, %d, %d, %d, %d, %d, %d, %d, %d, %d);\n"%(
+            n, input_id, 
+            input_node.output_shape[2], input_node.output_shape[3],
+            node.weight.shape[2], node.weight.shape[3],
+            node.stride[0], node.stride[1], node.padding[0],
+            node.padding[1], node.dilation[0], node.dilation[1],
+            node.zero_x
+        )
+    code += "\n"
+
+    # conv
+    conv_index = get_conv2d_index(n, calculation_graph)
+    calc_process = calc_process_with_parallel[conv_index]
+    for pair_index, pair in enumerate(calc_process):
+        left_line = pair[0]
+        right_line = pair[1]
+        left_line_type = None
+        right_line_type = None
+        if(not left_line is None):
+            if(left_line[0][0:4] == "copy"):
+                code += gen_copy(
+                    n, 
+                    calculation_graph,
+                    im2col_shape,
+                    divided_border,
+                    sub_matrix_size,
+                    calc_process_with_parallel,
+                    pair_index,
+                    0,       # select left or right
+                )
+            elif(left_line[0][0:7] == "set_dma"):
+                code += gen_set_dma(
+                    n, 
+                    calculation_graph,
+                    im2col_shape,
+                    divided_border,
+                    sub_matrix_size,
+                    calc_process_with_parallel,
+                    instr_analyse_result,
+                    resource_analyse_result,
+                    instruction_index,
+                    pair_index,
+                    0,       # select left or right
+                )
+            elif(left_line[0][0:4] == "load"):
+                code += gen_load(
+                    n, 
+                    calculation_graph,
+                    im2col_shape,
+                    divided_border,
+                    sub_matrix_size,
+                    calc_process_with_parallel,
+                    pair_index,
+                    0,       # select left or right
+                )
+            elif(left_line[0][0:5] == "store"):
+                code += gen_store(
+                    n, 
+                    calculation_graph,
+                    im2col_shape,
+                    divided_border,
+                    sub_matrix_size,
+                    calc_process_with_parallel,
+                    pair_index,
+                    0,       # select left or right
+                )
+        
+        if(not right_line is None):
+            if(right_line[0][0:4] == "copy"):
+                code += gen_copy(
+                    n, 
+                    calculation_graph,
+                    im2col_shape,
+                    divided_border,
+                    sub_matrix_size,
+                    calc_process_with_parallel,
+                    pair_index,
+                    1,       # select left or right
+                )
+            elif(right_line[0][0:7] == "set_dma"):
+                code += gen_set_dma(
+                    n, 
+                    calculation_graph,
+                    im2col_shape,
+                    divided_border,
+                    sub_matrix_size,
+                    calc_process_with_parallel,
+                    instr_analyse_result,
+                    resource_analyse_result,
+                    instruction_index,
+                    pair_index,
+                    1,       # select left or right
+                )
+            elif(right_line[0][0:4] == "load"):
+                code += gen_load(
+                    n, 
+                    calculation_graph,
+                    im2col_shape,
+                    divided_border,
+                    sub_matrix_size,
+                    calc_process_with_parallel,
+                    pair_index,
+                    1,       # select left or right
+                )
+            elif(right_line[0][0:5] == "store"):
+                code += gen_store(
+                    n, 
+                    calculation_graph,
+                    im2col_shape,
+                    divided_border,
+                    sub_matrix_size,
+                    calc_process_with_parallel,
+                    pair_index,
+                    1,       # select left or right
+                )
+
+
+    code += "\n\n"
+
+    return code
+
+
+
+def gen_QMaxpool2d(n, calculation_graph):
+    '''
+    Generate maxpool2d
+    '''
+    code = ""
+
+    # get node and some arguments
+    node = calculation_graph[n]
+    output_shape = node.output_shape
+
+    # get input_node and some arguments
+    input_id = node.input
+    input_node = calculation_graph[input_id]
+    input_shape = input_node.output_shape
+
+    code += "// layer %d: %s\n" \
+        "qmaxpool2d(layer_%d_res, layer_%d_res, %d, %d, %d, %d, " \
+        "%d, %d, %d, %d, %d, %d, %d, %d, %d);\n\n"%(
+            n, node,
+            n, node.input, input_shape[0], input_shape[1], input_shape[2],
+            input_shape[3], node.kernel_size[0], node.kernel_size[1],
+            node.stride[0], node.stride[1], node.padding[0], node.padding[1],
+            node.dilation[0], node.dilation[1], node.zero
+        )
+
+
+    return code
+
+
+
+def gen_QAvgpool2d(n, calculation_graph):
+    '''
+    Generate avgpool2d
+    '''
+    code = ""
+
+    # get node and some arguments
+    node = calculation_graph[n]
+    output_shape = node.output_shape
+
+    # get input_node and some arguments
+    input_id = node.input
+    input_node = calculation_graph[input_id]
+    input_shape = input_node.output_shape
+
+    code += "// layer %d: %s\n" \
+        "qavgpool2d(layer_%d_res, layer_%d_res, %d, %d, %d, %d, " \
+        "%d, %d, %d, %d, %d, %d, %d);\n\n"%(
+            n, node,
+            n, node.input, input_shape[0], input_shape[1], input_shape[2], 
+            input_shape[3], node.kernel_size[0], node.kernel_size[1],
+            node.stride[0], node.stride[1], node.padding[0], node.padding[1],
+            node.zero
+        )
+
+
+    return code
+
+
+
+def gen_Relu(n, calculation_graph):
+    '''
+    generate relu code 
+    #! Caution: part of ReLUs are fused into conv2d and dense
+    '''
+    code = ""
+    
+    # get node 
+    node = calculation_graph[n]
+    input_id = node.input
+
+    # get input_node
+    input_node = calculation_graph[input_id]
+    if(type(input_node) == op.QConv2d or 
+        type(input_node) == op.QDense):
+        # ReLU fused into input_node
+        code += "// layer %d: %s\n" \
+            "// fused into input layer\n\n"%(
+                n, node
+            )
+        return code
+    
+    # get data len
+    length = 1
+    for i in node.output_shape:
+        length *= i
+    
+    code += "// layer %d: %s\n" \
+        "qrelu(layer_%d_res, layer_%d_res, %d, %d);\n\n"%(
+            n, node,
+            n, node.input, length, node.zero
+        )
+
+    return code
+
+
+
+def gen_QFlatten(n, calculation_graph):
+    '''
+    Generate Flatten code
+    '''
+    code = ""
+
+    # get node
+    node = calculation_graph[n]
+    input_id = node.input
+
+    length = 1
+    for i in node.output_shape:
+        length *= i
+    
+    code += "// layer %d: %s\n" \
+        "qflatten(layer_%s_res, layer_%s_res, %d);\n\n"%(
+            n, node,
+            n, node.input, length
+        )
+
+
+    return code
+
+
+
+def gen_QDense(
+    n, 
+    calculation_graph,
+    instr_analyse_result,
+):
+    '''
+    Generate fc code
+    '''
+    code = ""
+
+    # get activation type
+    activation = 0
+    for node in calculation_graph:
+        if(type(node) == op.QInput):
+            continue
+        elif(type(node) == op.QAdd or 
+            type(node) == op.QConcat):
+            if(node.input1 == n or node.input2 == n):
+                next_node = node
+                break
+        else:
+            if(node.input == n):
+                next_node = node
+                break
+    if(type(next_node) == op.QRelu):
+        activation = 1
+    
+    # get this node
+    current_node = calculation_graph[n]
+
+    # hidden and output channel
+    hidden_channel = current_node.input_channel
+    output_channel = current_node.output_channel
+
+    # layer mux
+    mux = 0
+    for node_index, node in enumerate(calculation_graph):
+        if(node_index >= n):
+            break
+        if(type(node) == op.QDense):
+            mux += 1
+    
+    # list instr field(each item: (width, value))
+    instr_field = [
+        (instr_analyse_result["ps_calculation_type"], 1),
+        (instr_analyse_result["ps_activation_for_fc"], activation),
+        (instr_analyse_result["ps_hidden_channel_for_fc"], hidden_channel),
+        (instr_analyse_result["ps_output_channel_for_fc"], output_channel),
+        (instr_analyse_result["ps_layer_mux_for_fc"], mux),
+        (instr_analyse_result["ps_bit_width_need"] - 
+            instr_analyse_result["ps_bit_width_need_for_fc"], 0),
+    ]
+    
+    # generate binary instruction code
+    instruction_code = ""
+    for item in instr_field:
+        instruction_code += decimal_to_bin(item[1], item[0])
+    
+    # generate hexadecimal instruction code
+    instruction_code = bin_to_hex(instruction_code)
+    
+    # divide into 32bit per word
+    words = []
+    for i in range(instr_analyse_result["ps_bit_width_need"] // 32):
+        words.append(instruction_code[i*8 : i*8+8])
+    
+    # generate code
+    code += "// layer %d: %s\n"%(n, current_node)
+    code += "memcpy(layer_%d_in_dma, layer_%d_res, sizeof(uint8)*%d);\n"%(
+        n, current_node.input, current_node.input_channel
+    )
+    for count, word in enumerate(words):
+        code += "mmio[%d] = 0x%s;\n"%(count, word)
+    code += "mmio[%d] = 0xFFFFFFFF;\n"%(count+1)
+    code += """
+PYNQ_writeDMA(&dma_r0, &layer_%d_in_shared, 0, sizeof(uint8)*%d);
+PYNQ_waitForDMAComplete(&dma_r0, AXI_DMA_WRITE);
+PYNQ_writeDMA(&dma_r0, &layer_%d_weight_shared, 0, sizeof(uint8)*%d);
+PYNQ_waitForDMAComplete(&dma_r0, AXI_DMA_WRITE);
+PYNQ_readDMA(&dma_w0, &layer_%d_out_shared, 0, sizeof(uint64)*%d);
+PYNQ_waitForDMAComplete(&dma_w0, AXI_DMA_READ);\n"""%(
+        n, current_node.input_channel,
+        n, current_node.input_channel * current_node.output_channel,
+        n, current_node.output_channel,
+    )
+    code += """
+for(int i = 0; i<%d; i++) {
+    layer_%d_res[i] = (uint8)(layer_%d_out_dma[i]&0x000000FF);
+}
+    \n"""%(
+        current_node.output_channel,
+        n, n, 
+    )
+
+
+    
+    return code
+
+
+
+def gen_QDropout(n, calculation_graph):
+    '''
+    Generate dropout code
+    '''
+    code = ""
+
+    node = calculation_graph[n]
+
+    length = 1
+    for i in node.output_shape:
+        length *= 1
+    
+    code += "// layer %d: %s\n" \
+        "qdropout(layer_%d_res, layer_%d_res, %d);\n"%(
+            n, node,
+            n, node.input, length
+        )
+
+
+    return code
+
+
+
+def gen_QOutput(
+    n, 
+    calculation_graph,
+    output_count
+):
+    '''
+    Generate output code
+    '''
+    code = ""
+
+    node = calculation_graph[n]
+    
+    length = 1
+    for i in node.output_shape:
+        length *= 1
+    
+    code += "// layer %d: %s\n" \
+        "qoutput(layer_%d_res, layer_%d_res, %d);\n"%(
+            n, node,
+            n, node.input, length
+        )
+    code += "result[%d] = layer_%d_res;\n"%(output_count, n)
+
+
+    return code
+
+
+
+def gen_QAdd(
+    n, 
+    calculation_graph,
+    instr_analyse_result,
+):
+    '''
+    Generate add code
+    '''
+    code = ""
+
+    node = calculation_graph[n]
+    
+    # get data count
+    length = 1
+    for i in node.output_shape:
+        length *= i
+    
+    # layer mux
+    mux = 0
+    for node_index, temp_node in enumerate(calculation_graph):
+        if(node_index >= n):
+            break
+        if(type(temp_node) == op.QAdd):
+            mux += 1
+    
+    # list instr field(each item: (width, value))
+    instr_field = [
+        (instr_analyse_result["ps_calculation_type"], 2),
+        (instr_analyse_result["ps_total_count_for_add"], length),
+        (instr_analyse_result["ps_layer_mux_for_add"], mux),
+        (instr_analyse_result["ps_bit_width_need"] - 
+            instr_analyse_result["ps_bit_width_need_for_add"], 0),
+    ]
+
+    # generate binary instruction code
+    instruction_code = ""
+    for item in instr_field:
+        instruction_code += decimal_to_bin(item[1], item[0])
+    
+    # generate hexadecimal instruction code
+    instruction_code = bin_to_hex(instruction_code)
+
+    # divide into 32bit per word
+    words = []
+    for i in range(instr_analyse_result["ps_bit_width_need"] // 32):
+        words.append(instruction_code[i*8 : i*8+8])
+    
+    # generate code
+    code += "// layer %d: %s\n"%(n, node)
+    code += "memcpy(layer_%d_in1_dma, layer_%d_res, sizeof(uint8)*%d);\n"%(
+        n, node.input1, length
+    )
+    code += "memcpy(layer_%d_in2_dma, layer_%d_res, sizeof(uint8)*%d);\n"%(
+        n, node.input2, length
+    )
+    for count, word in enumerate(words):
+        code += "mmio[%d] = 0x%s;\n"%(count, word)
+    code += "mmio[%d] = 0xFFFFFFFF;\n"%(count+1)
+    code += """
+PYNQ_writeDMA(&dma_r0, &layer_%d_in1_shared, 0, sizeof(uint8)*%d);
+PYNQ_writeDMA(&dma_r1, &layer_%d_in2_shared, 0, sizeof(uint8)*%d);
+PYNQ_readDMA(&dma_w0, &layer_%d_out_shared, 0, sizeof(uint8)*%d);
+PYNQ_waitForDMAComplete(&dma_r0, AXI_DMA_WRITE);
+PYNQ_waitForDMAComplete(&dma_r0, AXI_DMA_WRITE);
+PYNQ_waitForDMAComplete(&dma_w0, AXI_DMA_READ);
+memcpy(layer_%d_res, layer_%d_out_dma, sizeof(uint8)*%d);
+    \n"""%(
+        n, length,
+        n, length,
+        n, length,
+        n, n, length
+    )
+    
+
+    return code
+
+
+
+def generate_calc(
+    calculation_graph,
+    im2col_shape,
+    divided_border,
+    sub_matrix_size,
+    calc_process_with_parallel,
+    instr_analyse_result,
+    resource_analyse_result,
+    instruction_index,
+):
+    '''
+    Generate calc
+    '''
+    code = ""
+    code += "void calc(uint8 ** result, uint8 * data)\n"
+    code += "{\n"
+    code += "int kernel_h;\n"
+    code += "int kernel_w;\n"
+    code += "int dilation_h;\n"
+    code += "int dilation_w;\n"
+    code += "int height;\n"
+    code += "int width;\n"
+    code += "int pad_h;\n"
+    code += "int pad_w;\n"
+    code += "int stride_h;\n"
+    code += "int stride_w;\n"
+    code += "int channels;\n"
+    code += "int dil_kernel_h;\n"
+    code += "int dil_kernel_w;\n"
+    code += "int height_col;\n"
+    code += "int width_col;\n"
+    code += "int channels_col;\n"
+    code += "int yh;\n"
+    code += "int yw;\n"
+    code += "Fixed_point * fp_temp = Fixed_point_init(0);\n"
+    code += "int * dst_ptr_int;\n"
+    code += "int * src_ptr_int;\n"
+    code += "uint8 * dst_ptr_uint8;\n"
+    code += "uint8 * src_ptr_uint8;\n"
+
+    # number of output_node
+    output_count = 0
+
+    for n, node in enumerate(calculation_graph):
+        if(type(node) == op.QInput):
+            code += gen_QInput(n, calculation_graph)
+        elif(type(node) == op.QConv2d):
+            code += gen_QConv2d(
+                n, 
+                calculation_graph,
+                im2col_shape,
+                divided_border,
+                sub_matrix_size,
+                calc_process_with_parallel,
+                instr_analyse_result,
+                resource_analyse_result,
+                instruction_index,
+            )
+        elif(type(node) == op.QMaxpool2d):
+            code += gen_QMaxpool2d(n, calculation_graph)
+        elif(type(node) == op.QAvgpool2d):
+            code += gen_QAvgpool2d(n, calculation_graph)
+        elif(type(node) == op.QRelu):
+            code += gen_Relu(n, calculation_graph)
+        elif(type(node) == op.QFlatten):
+            code += gen_QFlatten(n, calculation_graph)
+        elif(type(node) == op.QDense):
+            code += gen_QDense(
+                n, 
+                calculation_graph,
+                instr_analyse_result,
+            )
+        elif(type(node) == op.QDropout):
+            code += gen_QDropout(n, calculation_graph)
+        elif(type(node) == op.QOutput):
+            code += gen_QOutput(n, calculation_graph, output_count)
+            output_count += 1
+        elif(type(node) == op.QAdd):
+            code += gen_QAdd(
+                n, 
+                calculation_graph,
+                instr_analyse_result,
+            )
+    code += "}\n"
 
     return code
 
@@ -1220,6 +2567,9 @@ def gen_call_lib_c(
     divided_border,
     sub_matrix_size,
     calc_process_with_parallel,
+    instr_analyse_result,
+    resource_analyse_result,
+    instruction_index,
 ):
     '''
     Generate call_lib.c to run on arm cpu
@@ -1258,7 +2608,12 @@ def gen_call_lib_c(
     )
 
     # declare bus
-    code += declare_bus()
+    code += declare_bus(
+        BRAM_CTRL_0="0x40000000",
+        AXI_DMA_R0="0x40400000",
+        AXI_DMA_R1="0x40410000",
+        AXI_DMA_W0="0x40420000",
+    )
 
     # init
     code += generate_init(
@@ -1266,7 +2621,19 @@ def gen_call_lib_c(
         im2col_shape,
         divided_border,
         sub_matrix_size,
-        calc_process_with_parallel
+        calc_process_with_parallel,
+    )
+
+    # calc
+    code += generate_calc(
+        calculation_graph,
+        im2col_shape,
+        divided_border,
+        sub_matrix_size,
+        calc_process_with_parallel,
+        instr_analyse_result,
+        resource_analyse_result,
+        instruction_index,
     )
     
 
@@ -1280,6 +2647,9 @@ def gen_code(
     divided_border,
     submatrix_size,
     calc_process_with_parallel,
+    instr_analyse_result,
+    resource_analyse_result,
+    instruction_index,
 ):
     '''
     Generate C code to run on arm cpu
@@ -1300,6 +2670,9 @@ def gen_code(
         divided_border,
         submatrix_size,
         calc_process_with_parallel,
+        instr_analyse_result,
+        resource_analyse_result,
+        instruction_index,
     )
 
     fixed_point_h_code, fixed_point_c_code = gen_fixed_point_lib()

@@ -386,12 +386,8 @@ def gen_top(
     ps_calc_type_width = INSTR_ANALYSE_RESULT["ps_calculation_type"]
     ps_weight_len_width = INSTR_ANALYSE_RESULT[
         "ps_weight_data_length_for_conv"]
-    ps_weight_len_width_exponent = INSTR_ANALYSE_RESULT[
-        "ps_weight_data_length_for_conv_exponent"]
     ps_feature_map_len_width = INSTR_ANALYSE_RESULT[
         "ps_feature_map_data_length_for_conv"]
-    ps_feature_map_len_width_exponent = INSTR_ANALYSE_RESULT[
-        "ps_feature_map_data_length_for_conv_exponent"]
     ps_instr_begin_addr_width = INSTR_ANALYSE_RESULT[
         "ps_instr_begin_addr_for_conv"]
     ps_instr_end_addr_width = INSTR_ANALYSE_RESULT[
@@ -399,12 +395,8 @@ def gen_top(
     code += indent + "reg [%d:0] ps_instruction;\n"%(ps_instr_width-1)
     code += indent + "reg [%d:0] ps_calc_type;\n"%(ps_calc_type_width-1)
     code += indent + "reg [%d:0] ps_weight_len;\n"%(ps_weight_len_width-1)
-    code += indent + "reg [%d:0] ps_weight_len_exponent;\n"%(
-        ps_weight_len_width_exponent-1)
     code += indent + "reg [%d:0] ps_feature_map_len;\n"%(
         ps_feature_map_len_width-1)
-    code += indent + "reg [%d:0] ps_feature_map_len_exponent;\n"%(
-        ps_feature_map_len_width_exponent-1)
     code += indent + "reg [%d:0] ps_instr_start_addr;\n"%(
         ps_instr_begin_addr_width-1)
     code += indent + "reg [%d:0] ps_instr_end_addr;\n"%(
@@ -607,9 +599,7 @@ def gen_top(
     code += indent + "ps_instruction = 0;\n"
     code += indent + "ps_calc_type = 0;\n"
     code += indent + "ps_weight_len = 0;\n"
-    code += indent + "ps_weight_len_exponent = 0;\n"
     code += indent + "ps_feature_map_len = 0;\n"
-    code += indent + "ps_feature_map_len_exponent = 0;\n"
     code += indent + "ps_instr_start_addr = 0;\n"
     code += indent + "ps_instr_end_addr = 0;\n"
     code += indent + "pl_instruction = 0;\n"
@@ -754,16 +744,12 @@ def gen_top(
     code += indent + "bram_we <= 4'b0000;\n"
     ps_conv_instr_field_list = [
         ("ps_calc_type", ps_calc_type_width),
-        ("ps_weight_len", ps_weight_len_width_exponent, 
-            ps_weight_len_width, "ps_weight_len_exponent"),
-        ("ps_feature_map_len", ps_feature_map_len_width_exponent, 
-            ps_feature_map_len_width, "ps_feature_map_len_exponent"),
+        ("ps_weight_len", ps_weight_len_width),
+        ("ps_feature_map_len", ps_feature_map_len_width),
         ("ps_instr_start_addr", ps_instr_begin_addr_width),
         ("ps_instr_end_addr", ps_instr_end_addr_width),
     ]
     ps_conv_instr_field_exponent_list = [
-        "ps_weight_len",
-        "ps_feature_map_len",
     ]
     len_accumulate = 0
     for pair in ps_conv_instr_field_list:
@@ -795,6 +781,12 @@ def gen_top(
         ps_calc_type_width, decimal_to_bin(1, ps_calc_type_width))
     indent = "\t\t\t\t\t\t\t"
     code += indent + "state <= FULLY_CONNECT;\n"
+    indent = "\t\t\t\t\t\t"
+    code += indent + "end\n"
+    code += indent + "else if(ps_calc_type == %d'b%s) begin\n"%(
+        ps_calc_type_width, decimal_to_bin(2, ps_calc_type_width))
+    indent = "\t\t\t\t\t\t\t"
+    code += indent + "state <= ADD;\n"
     indent = "\t\t\t\t\t\t"
     code += indent + "end\n"
     code += indent + "else begin\n"

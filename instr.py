@@ -53,8 +53,6 @@ instruction in pl
 '''
 
 import math
-from typing import Type
-from unicodedata import decimal
 
 from add import decimal_to_bin
 import analyser
@@ -146,9 +144,6 @@ def analyse_instr(
     ps_weight_data_length_for_conv = math.ceil(math.log2(
         max_len_support))+1 if (bram_group > 0) else \
         math.ceil(math.log2(bram_depth))+1
-    ps_weight_data_length_for_conv_exponent = math.ceil(math.log2(math.log2(
-        max_len_support)))+1 if (bram_group > 0) else \
-        math.ceil(math.log2(math.log2(bram_depth)))+1
     
     # # # feature map data length(int unit of bram row)
     '''
@@ -157,9 +152,6 @@ def analyse_instr(
     ps_feature_map_data_length_for_conv = math.ceil(math.log2(
         max_len_support))+1 if (bram_group > 0) else math.ceil(
         math.log2(bram_depth))+1
-    ps_feature_map_data_length_for_conv_exponent = math.ceil(math.log2(
-        math.log2(max_len_support)))+1 if (bram_group > 0) else math.ceil(
-        math.log2(math.log2(bram_depth)))+1
 
     # # # instruction begin addr to execute
     '''
@@ -187,10 +179,10 @@ def analyse_instr(
 
     # # # total bit width need by ps conv post_process
     ps_bit_width_need_conv = ps_calculation_type + \
-        ps_weight_data_length_for_conv_exponent + \
-        ps_feature_map_data_length_for_conv_exponent + \
+        ps_weight_data_length_for_conv + \
+        ps_feature_map_data_length_for_conv + \
         ps_instr_begin_addr_for_conv + ps_instr_end_addr_for_conv
-
+    
 
     # # instruction field for fully connect
     # # # activation
@@ -429,27 +421,30 @@ def analyse_instr(
     # return result
     # marked by 'e' means the variable is recorded by exponent
     return {
+        # ps
         "ps_calculation_type": pl_calculation_type,
-        "ps_weight_data_length_for_conv": ps_weight_data_length_for_conv, #e
-        "ps_weight_data_length_for_conv_exponent": 
-            ps_weight_data_length_for_conv_exponent,
+        # ps for conv(and pp)
+        "ps_weight_data_length_for_conv": ps_weight_data_length_for_conv, 
         "ps_feature_map_data_length_for_conv": 
-            ps_feature_map_data_length_for_conv, #e
-        "ps_feature_map_data_length_for_conv_exponent":
-            ps_feature_map_data_length_for_conv_exponent,
+            ps_feature_map_data_length_for_conv, 
         "ps_instr_begin_addr_for_conv": ps_instr_begin_addr_for_conv,
         "ps_instr_end_addr_for_conv": ps_instr_end_addr_for_conv,
         "ps_bit_width_need_for_conv": ps_bit_width_need_conv,
+        # ps for fc
         "ps_activation_for_fc": ps_activation_for_fc,
         "ps_hidden_channel_for_fc": ps_hidden_channel_for_fc,
         "ps_output_channel_for_fc": ps_output_channel_for_fc,
         "ps_layer_mux_for_fc": ps_layer_mux_for_fc,
         "ps_bit_width_need_for_fc": ps_bit_width_need_fc,
+        # ps for add
         "ps_total_count_for_add": ps_total_count_for_add,
         "ps_layer_mux_for_add": ps_layer_mux_for_add,
         "ps_bit_width_need_for_add": ps_bit_width_need_add,
+        # ps total
         "ps_bit_width_need": ps_bit_width_need,
+        # pl
         "pl_calculation_type": pl_calculation_type,
+        # pl for conv
         "pl_mult_side_length_for_conv": pl_multiply_side_length_for_conv, #e
         "pl_mult_side_length_for_conv_exponent": 
             pl_multiply_side_length_for_conv_exponent,
@@ -468,6 +463,7 @@ def analyse_instr(
         "pl_store_or_accumulate_for_conv": pl_store_or_accumulate_for_conv,
         "pl_layer_mux_for_conv": pl_layer_mux_for_conv,
         "pl_bit_width_need_for_conv": pl_bit_width_need_conv,
+        # pl for pp
         "pl_side_length_for_pp": pl_side_len_for_pp, #e
         "pl_side_length_for_pp_exponent": pl_side_len_for_pp_exponent,
         "pl_start_channel_for_pp": pl_start_channel_for_pp,
@@ -477,8 +473,10 @@ def analyse_instr(
         "pl_process_lines_for_pp": pl_process_lines_for_pp,
         "pl_activation_for_pp": pl_activation_for_pp,
         "pl_bit_width_need_for_pp": pl_bit_width_need_pp,
+        # pl for wb
         "pl_write_back_rows_for_wb": pl_write_back_rows_for_wb,
         "pl_bit_width_need_for_wb": pl_bit_width_need_wb,
+        # pl total
         "pl_bit_width_need": pl_bit_width_need
     }
 

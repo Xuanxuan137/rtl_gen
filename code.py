@@ -526,7 +526,7 @@ def gen_code(
     )
     with open("output/fpga_deploy/instrset.v", "w") as f:
         f.write(instrset_code)
-
+    
     # generate c on board
     cmake_txt, \
     main_code, \
@@ -538,7 +538,10 @@ def gen_code(
         im2col_shape=im2col_shape,
         divided_border=divided_border,
         submatrix_size=submatrix_size,
-        calc_process_with_parallel=calc_process_with_parallel
+        calc_process_with_parallel=calc_process_with_parallel,
+        instr_analyse_result=instr_analyse_result,
+        resource_analyse_result=resource_analyse_result,
+        instruction_index=instruction_index,
     )
     with open("output/fpga_deploy/CMakelists.txt", "w") as f:
         f.write(cmake_txt)
