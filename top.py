@@ -2,7 +2,7 @@
 
 
 import math
-from pickle import INST
+import op
 
 
 def decimal_to_bin(value, width):
@@ -51,6 +51,7 @@ def gen_top(
     PP_CHANNEL: int,            # max channel of conv
     PP_MUX_WIDTH: int,          # pp layer mux width
     INSTR_ANALYSE_RESULT: dict, # instructions' bit width dict
+    CALCULATION_GRAPH: list,    # calculation graph
 ):
     '''
     Gen top module of the accelerator
@@ -58,6 +59,12 @@ def gen_top(
     # Signals need to debug. Each element is a list, which has 3 values, 
     # which are signal name, signal width, and signal array depth
     debug_signals = []
+
+    # check if there is any add layers in the model
+    has_add_layer = False
+    for n, node in enumerate(CALCULATION_GRAPH):
+        if(type(node) == op.QAdd):
+            has_add_layer = True
 
     code = ""
 
@@ -296,7 +303,7 @@ def gen_top(
                 width += 1
             total_width = (MAX_LEN_SUPPORT // port) * width
             code += indent + "wire [%d:0] conv_add%d_%d;\n"%(
-                total_width, port, unit)
+                total_width-1, port, unit)
             code += indent + "wire conv_add%d_valid_%d;\n"%(port, unit)
         code += indent + "reg [31:0] conv_temp_result_%d;\n"%(unit)
         
@@ -340,16 +347,17 @@ def gen_top(
     code += indent + "wire [%d:0] instrset_dout;\n"%(pl_instr_width-1)
 
     # signals for add
-    add_total_count_width = INSTR_ANALYSE_RESULT["ps_total_count_for_add"]
-    add_layer_mux_width = INSTR_ANALYSE_RESULT["ps_layer_mux_for_add"]
-    code += indent + "reg [%d:0] add_total_count;\n"%(add_total_count_width-1)
-    code += indent + "reg [%d:0] add_mux;\n"%(add_layer_mux_width-1)
-    code += indent + "reg add_reset;\n"
-    code += indent + "wire add_r0_tready;\n"
-    code += indent + "wire add_r1_tready;\n"
-    code += indent + "wire [%d:0] add_w0_tdata;\n"%(dma_bit_width-1)
-    code += indent + "wire add_w0_tvalid;\n"
-    code += indent + "wire add_w0_tlast;\n"
+    if(has_add_layer):
+        add_total_count_width = INSTR_ANALYSE_RESULT["ps_total_count_for_add"]
+        add_layer_mux_width = INSTR_ANALYSE_RESULT["ps_layer_mux_for_add"]
+        code += indent + "reg [%d:0] add_total_count;\n"%(add_total_count_width-1)
+        code += indent + "reg [%d:0] add_mux;\n"%(add_layer_mux_width-1)
+        code += indent + "reg add_reset;\n"
+        code += indent + "wire add_r0_tready;\n"
+        code += indent + "wire add_r1_tready;\n"
+        code += indent + "wire [%d:0] add_w0_tdata;\n"%(dma_bit_width-1)
+        code += indent + "wire add_w0_tvalid;\n"
+        code += indent + "wire add_w0_tlast;\n"
 
     # initialize signals of modules
     code += indent + "initial begin\n"
@@ -373,9 +381,10 @@ def gen_top(
         code += indent + "pp_mux_%d = 0;\n"%(unit)
         code += indent + "pp_activation_%d = 0;\n"%(unit)
     code += indent + "instrset_addr = 0;\n"
-    code += indent + "add_total_count = 0;\n"
-    code += indent + "add_mux = 0;\n"
-    code += indent + "add_reset = 0;\n"
+    if(has_add_layer):
+        code += indent + "add_total_count = 0;\n"
+        code += indent + "add_mux = 0;\n"
+        code += indent + "add_reset = 0;\n"
     indent = "\t"
     code += indent + "end\n"
 
@@ -506,12 +515,13 @@ def gen_top(
         ps_output_channel_fc_width-1)
     code += indent + "reg [%d:0] ps_layer_mux_fc;\n"%(ps_layer_mux_fc_width-1)
     # signals for add
-    ps_total_count_add_width = INSTR_ANALYSE_RESULT["ps_total_count_for_add"]
-    ps_layer_mux_add_width = INSTR_ANALYSE_RESULT["ps_layer_mux_for_add"]
-    code += indent + "reg [%d:0] ps_total_count_add;\n"%(
-        ps_total_count_add_width-1)
-    code += indent + "reg [%d:0] ps_layer_mux_add;\n"%(
-        ps_layer_mux_add_width-1)
+    if(has_add_layer):
+        ps_total_count_add_width = INSTR_ANALYSE_RESULT["ps_total_count_for_add"]
+        ps_layer_mux_add_width = INSTR_ANALYSE_RESULT["ps_layer_mux_for_add"]
+        code += indent + "reg [%d:0] ps_total_count_add;\n"%(
+            ps_total_count_add_width-1)
+        code += indent + "reg [%d:0] ps_layer_mux_add;\n"%(
+            ps_layer_mux_add_width-1)
 
     # signals for top state machine
     states = [
@@ -631,9 +641,10 @@ def gen_top(
     code += indent + "ps_hidden_channel_fc = 0;\n"
     code += indent + "ps_output_channel_fc = 0;\n"
     code += indent + "ps_layer_mux_fc = 0;\n"
-    code += indent + "ps_total_count_add = 0;\n"
-    code += indent + "ps_layer_mux_add = 0;\n"
-    code += indent + "state = 0;\n"
+    if(has_add_layer):
+        code += indent + "ps_total_count_add = 0;\n"
+        code += indent + "ps_layer_mux_add = 0;\n"
+    code += indent + "state = PS_INSTR_READ;\n"
     code += indent + "internal_state = 0;\n"
     code += indent + "dma_state = 0;\n"
     code += indent + "cycle = 0;\n"
@@ -939,6 +950,7 @@ def gen_top(
         "pl_mult_side_len_conv_exponent + %d - %d;\n"%(
         math.ceil(math.log2(CALC_UNIT_PER_BRAM_GROUP)),
         math.ceil(math.log2(MAX_LEN_SUPPORT)))
+    code += indent + "internal_state <= 2;\n"
     indent = "\t\t\t\t\t"
     code += indent + "end\n"
     # CONVOLUTION: 2 -> calculate some arguments
@@ -953,6 +965,7 @@ def gen_top(
         + pl_mult_side_len_conv_width)
     code += indent + "count_finish_cycle <= %d'b1 << " \
         "count_finish_cycle_exponent;\n"%(count_width)
+    code += indent + "internal_state <= 3;\n"
     indent = "\t\t\t\t\t"
     code += indent + "end\n"
     # CONVOLUTION: 3 -> branch by mult side len
@@ -1181,7 +1194,7 @@ def gen_top(
                 " + 2) begin\n"
             indent = "\t\t\t\t\t\t\t"
             for i in range(CALC_UNIT_PER_BRAM_GROUP):
-                code += indent + "temp_f_%d_%d <= {\n"%(port, i)
+                code += indent + "temp_f_%d <= {\n"%(port)
                 indent = "\t"*8
                 for j in range(FEATURE_MAP_BUF_COL):
                     code += indent + "bram_b_doutb[%d],\n"%(j)
@@ -1197,7 +1210,7 @@ def gen_top(
             for i in range(CALC_UNIT_PER_BRAM_GROUP):
                 code += indent + "conv_ina_%d <= {%d{temp_w_%d_%d}};\n"%(i, 
                     MAX_LEN_SUPPORT // port, port, i)
-                code += indent + "conv_inb_%d <= temp_f_%d_%d;\n"%(i, port, i)
+                code += indent + "conv_inb_%d <= temp_f_%d;\n"%(i, port)
                 code += indent + "conv_in_valid_%d <= 1;\n"%(i)
             indent= "\t\t\t\t\t\t"
             code += indent + "end\n"
@@ -1399,7 +1412,7 @@ def gen_top(
                     code += "count2[%d:1]}] <= {\n"%(math.ceil(math.log2(min(
                         OUTPUT_BUF_COL, cycles_increase_r_addr_once))))
                     indent = "\t"*10
-                    code += indent + "conv_result_temp_%d,\n"%(i)
+                    code += indent + "conv_temp_result_%d,\n"%(i)
                     code += indent + "conv_add%d_%d\n"%(port, i)
                     indent = "\t"*9
                     code += indent + "};\n"
@@ -1508,7 +1521,7 @@ def gen_top(
                     code += "count2[%d:1]}] <= {\n"%(math.ceil(math.log2(min(
                         OUTPUT_BUF_COL, cycles_increase_r_addr_once))))
                     indent = "\t"*10
-                    code += indent + "{conv_result_temp_%d + bram_r_doutb[{" \
+                    code += indent + "{conv_temp_result_%d + bram_r_doutb[{" \
                         "%scount2[%d:1]}][63:32]},\n"%(i, 
                         bram_r_dina_select_field_calc_unit, math.ceil(math.log2
                         (min(OUTPUT_BUF_COL, cycles_increase_r_addr_once))))
@@ -2069,7 +2082,7 @@ def gen_top(
     code += indent + "count3 <= 0;\n"
     code += indent + "block_count3 <= 0;\n"
     code += indent + "block_count4 <= 0;\n"
-    code += indent + "PS_INSTR_READ;\n"
+    code += indent + "state <= PS_INSTR_READ;\n"
     indent = "\t\t\t\t\t\t\t"
     code += indent + "end\n"
     indent = "\t\t\t\t\t\t"
@@ -2122,12 +2135,12 @@ def gen_top(
     code += indent + "bram_b_addra[block_count1] <= count1;\n"
     code += indent + "bram_b_wea[block_count1] <= 1;\n"
     code += indent + "block_count1 <= block_count1 + 1;\n"
-    code += indent + "if(block_count == %d) begin\n"%(FEATURE_MAP_BUF_COL-1)
+    code += indent + "if(block_count1 == %d) begin\n"%(FEATURE_MAP_BUF_COL-1)
     indent = "\t"*8
     code += indent + "count1 <= count1 + 1;\n"
     code += indent + "if(count1 == ps_feature_map_len - 1) begin\n"
     indent = "\t"*9
-    code += indent + "read_r1_finished <= 1;\n"
+    code += indent + "r1_read_finished <= 1;\n"
     indent = "\t"*8
     code += indent + "end\n"
     indent = "\t\t\t\t\t\t\t"
@@ -2175,93 +2188,94 @@ def gen_top(
     indent = "\t\t\t"
     code += indent + "end\n"
     # ADD
-    code += indent + "ADD: begin\n"
-    indent = "\t\t\t\t"
-    code += indent + "case(internal_state)\n"
-    indent = "\t\t\t\t\t"
-    # ADD: 0 -> decode
-    code += indent + "0: begin\n"
-    indent = "\t\t\t\t\t\t"
-    pl_add_instr_field_list = [
-        ("ps_total_count_add", ps_total_count_add_width),
-        ("ps_layer_mux_add", ps_layer_mux_add_width),
-    ]
-    pl_add_instr_field_exponent_list = [
-    ]
-    len_accumulate = ps_calc_type_width
-    for pair in pl_add_instr_field_list:
-        if(pair[0] in pl_add_instr_field_exponent_list):
-            code += indent + "%s <= %d'b1 << ps_instruction[%d:%d];\n"%(
-                pair[0], pair[2], pl_instr_width - 1 - len_accumulate, 
-                pl_instr_width - len_accumulate - pair[1])
-            code += indent + "%s <= ps_instruction[%d:%d];\n"%(
-                pair[3], pl_instr_width - 1 - len_accumulate, 
-                pl_instr_width - len_accumulate - pair[1])
-        else:
-            code += indent + "%s <= ps_instruction[%d:%d];\n"%(pair[0], 
-                pl_instr_width - 1 - len_accumulate, 
-                pl_instr_width - len_accumulate - pair[1])
-        len_accumulate += pair[1]
-    code += indent + "internal_state <= 1;\n"
-    indent = "\t\t\t\t\t"
-    code += indent + "end\n"
-    # ADD: 1 -> update arguments
-    code += indent + "1: begin\n"
-    indent = "\t\t\t\t\t\t"
-    code += indent + "add_total_count <= ps_total_count_add;\n"
-    code += indent + "add_mux <= ps_layer_mux_add;\n"
-    code += indent + "internal_state <= 2;\n"
-    indent = "\t\t\t\t\t"
-    code += indent + "end\n"
-    # ADD: 2 -> calculate
-    code += indent + "2: begin\n"
-    indent = "\t\t\t\t\t\t"
-    code += indent + "dma_r0_tready <= add_r0_tready;\n"
-    code += indent + "dma_r1_tready <= add_r1_tready;\n"
-    code += indent + "if(dma_w0_tready) begin\n"
-    indent = "\t\t\t\t\t\t\t"
-    code += indent + "dma_w0_tdata <= add_w0_tdata;\n"
-    code += indent + "dma_w0_tvalid <= add_w0_tvalid;\n"
-    code += indent + "dma_w0_tlast <= add_w0_tlast;\n"
-    code += indent + "if(add_w0_tvalid) begin\n"
-    indent = "\t"*8
-    code += indent + "dma_w0_tkeep <= 8'hff;\n"
-    indent = "\t\t\t\t\t\t\t"
-    code += indent + "end\n"
-    code += indent + "if(dma_w0_tlast) begin\n"
-    indent = "\t"*8
-    code += indent + "internal_state <= 3;\n"
-    indent = "\t\t\t\t\t\t\t"
-    code += indent + "end\n"
-    indent = "\t\t\t\t\t\t"
-    code += indent + "end\n"
-    indent = "\t\t\t\t\t"
-    code += indent + "end\n"
-    # ADD: 3 -> reset add module
-    code += indent + "3: begin\n"
-    indent = "\t\t\t\t\t\t"
-    code += indent + "add_reset <= 1;\n"
-    code += indent + "internal_state <= 4;\n"
-    indent = "\t\t\t\t\t"
-    code += indent + "end\n"
-    # ADD: 4 -> continue reset add module
-    code += indent + "4: begin\n"
-    indent = "\t\t\t\t\t\t"
-    code += indent + "internal_state <= 5;\n"
-    indent = "\t\t\t\t\t"
-    code += indent + "end\n"
-    # ADD: 5 -> reset
-    code += indent + "5: begin\n"
-    indent = "\t\t\t\t\t\t"
-    code += indent + "add_reset <= 0;\n"
-    code += indent + "state <= PS_INSTR_READ;\n"
-    code += indent + "internal_state <= 0;\n"
-    indent = "\t\t\t\t\t"
-    code += indent + "end\n"
-    indent = "\t\t\t\t"
-    code += indent + "endcase\n"
-    indent = "\t\t\t"
-    code += indent + "end\n"
+    if(has_add_layer):
+        code += indent + "ADD: begin\n"
+        indent = "\t\t\t\t"
+        code += indent + "case(internal_state)\n"
+        indent = "\t\t\t\t\t"
+        # ADD: 0 -> decode
+        code += indent + "0: begin\n"
+        indent = "\t\t\t\t\t\t"
+        pl_add_instr_field_list = [
+            ("ps_total_count_add", ps_total_count_add_width),
+            ("ps_layer_mux_add", ps_layer_mux_add_width),
+        ]
+        pl_add_instr_field_exponent_list = [
+        ]
+        len_accumulate = ps_calc_type_width
+        for pair in pl_add_instr_field_list:
+            if(pair[0] in pl_add_instr_field_exponent_list):
+                code += indent + "%s <= %d'b1 << ps_instruction[%d:%d];\n"%(
+                    pair[0], pair[2], pl_instr_width - 1 - len_accumulate, 
+                    pl_instr_width - len_accumulate - pair[1])
+                code += indent + "%s <= ps_instruction[%d:%d];\n"%(
+                    pair[3], pl_instr_width - 1 - len_accumulate, 
+                    pl_instr_width - len_accumulate - pair[1])
+            else:
+                code += indent + "%s <= ps_instruction[%d:%d];\n"%(pair[0], 
+                    pl_instr_width - 1 - len_accumulate, 
+                    pl_instr_width - len_accumulate - pair[1])
+            len_accumulate += pair[1]
+        code += indent + "internal_state <= 1;\n"
+        indent = "\t\t\t\t\t"
+        code += indent + "end\n"
+        # ADD: 1 -> update arguments
+        code += indent + "1: begin\n"
+        indent = "\t\t\t\t\t\t"
+        code += indent + "add_total_count <= ps_total_count_add;\n"
+        code += indent + "add_mux <= ps_layer_mux_add;\n"
+        code += indent + "internal_state <= 2;\n"
+        indent = "\t\t\t\t\t"
+        code += indent + "end\n"
+        # ADD: 2 -> calculate
+        code += indent + "2: begin\n"
+        indent = "\t\t\t\t\t\t"
+        code += indent + "dma_r0_tready <= add_r0_tready;\n"
+        code += indent + "dma_r1_tready <= add_r1_tready;\n"
+        code += indent + "if(dma_w0_tready) begin\n"
+        indent = "\t\t\t\t\t\t\t"
+        code += indent + "dma_w0_tdata <= add_w0_tdata;\n"
+        code += indent + "dma_w0_tvalid <= add_w0_tvalid;\n"
+        code += indent + "dma_w0_tlast <= add_w0_tlast;\n"
+        code += indent + "if(add_w0_tvalid) begin\n"
+        indent = "\t"*8
+        code += indent + "dma_w0_tkeep <= 8'hff;\n"
+        indent = "\t\t\t\t\t\t\t"
+        code += indent + "end\n"
+        code += indent + "if(dma_w0_tlast) begin\n"
+        indent = "\t"*8
+        code += indent + "internal_state <= 3;\n"
+        indent = "\t\t\t\t\t\t\t"
+        code += indent + "end\n"
+        indent = "\t\t\t\t\t\t"
+        code += indent + "end\n"
+        indent = "\t\t\t\t\t"
+        code += indent + "end\n"
+        # ADD: 3 -> reset add module
+        code += indent + "3: begin\n"
+        indent = "\t\t\t\t\t\t"
+        code += indent + "add_reset <= 1;\n"
+        code += indent + "internal_state <= 4;\n"
+        indent = "\t\t\t\t\t"
+        code += indent + "end\n"
+        # ADD: 4 -> continue reset add module
+        code += indent + "4: begin\n"
+        indent = "\t\t\t\t\t\t"
+        code += indent + "internal_state <= 5;\n"
+        indent = "\t\t\t\t\t"
+        code += indent + "end\n"
+        # ADD: 5 -> reset
+        code += indent + "5: begin\n"
+        indent = "\t\t\t\t\t\t"
+        code += indent + "add_reset <= 0;\n"
+        code += indent + "state <= PS_INSTR_READ;\n"
+        code += indent + "internal_state <= 0;\n"
+        indent = "\t\t\t\t\t"
+        code += indent + "end\n"
+        indent = "\t\t\t\t"
+        code += indent + "endcase\n"
+        indent = "\t\t\t"
+        code += indent + "end\n"
     indent = "\t\t"
     code += indent + "endcase\n"
     indent = "\t"
@@ -2330,26 +2344,27 @@ def gen_top(
     code += indent + ");\n"
 
     # add
-    code += indent + "add add0(\n"
-    indent = "\t\t"
-    code += indent + ".clk(clk),\n"
-    code += indent + ".reset(add_reset),\n"
-    code += indent + ".total_count(add_total_count),\n"
-    code += indent + ".r0_tdata(dma_r0_tdata),\n"
-    code += indent + ".r0_tvalid(dma_r0_tvalid),\n"
-    code += indent + ".r0_tready(dma_r0_tready),\n"
-    code += indent + ".r1_tdata(dma_r1_tdata),\n"
-    code += indent + ".r1_tvalid(dma_r1_tvalid),\n"
-    code += indent + ".r1_tready(dma_r1_tready),\n"
-    code += indent + ".w0_tready(dma_w0_tready),\n"
-    code += indent + ".mux(add_mux),\n"
-    code += indent + ".add_r0_tready(add_r0_tready),\n"
-    code += indent + ".add_r1_tready(add_r1_tready),\n"
-    code += indent + ".w0_tdata(add_w0_tdata),\n"
-    code += indent + ".w0_tvalid(add_w0_tvalid),\n"
-    code += indent + ".w0_tlast(add_w0_tlast)\n"
-    indent = "\t"
-    code += indent + ");\n"
+    if(has_add_layer):
+        code += indent + "add add0(\n"
+        indent = "\t\t"
+        code += indent + ".clk(clk),\n"
+        code += indent + ".reset(add_reset),\n"
+        code += indent + ".total_count(add_total_count),\n"
+        code += indent + ".r0_tdata(dma_r0_tdata),\n"
+        code += indent + ".r0_tvalid(dma_r0_tvalid),\n"
+        code += indent + ".r0_tready(dma_r0_tready),\n"
+        code += indent + ".r1_tdata(dma_r1_tdata),\n"
+        code += indent + ".r1_tvalid(dma_r1_tvalid),\n"
+        code += indent + ".r1_tready(dma_r1_tready),\n"
+        code += indent + ".w0_tready(dma_w0_tready),\n"
+        code += indent + ".mux(add_mux),\n"
+        code += indent + ".add_r0_tready(add_r0_tready),\n"
+        code += indent + ".add_r1_tready(add_r1_tready),\n"
+        code += indent + ".w0_tdata(add_w0_tdata),\n"
+        code += indent + ".w0_tvalid(add_w0_tvalid),\n"
+        code += indent + ".w0_tlast(add_w0_tlast)\n"
+        indent = "\t"
+        code += indent + ");\n"
 
     
     # generate simulation debug signals
@@ -2363,6 +2378,14 @@ def gen_top(
             code += indent + "wire [%d:0] %s_probe_%d = %s[%d];\n"%(
                 signal_width-1, signal_name, i, signal_name, i
             )
+    code += """
+initial begin
+    $dumpfile("main.vcd");
+    $dumpvars(0, main);
+    #50000;
+    $finish;
+end
+    """
 
 
     code += "endmodule"

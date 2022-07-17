@@ -151,11 +151,11 @@ def gen_add(
     # generate adder unsigned extend
     code += indent + "reg signed [8:0] adder1_use[%d:0];\n"%(dma_count-1)
     code += indent + "reg signed [8:0] adder2_use[%d:0];\n"%(dma_count-1)
-    code += indent + "reg adder_user_valid;\n"
+    code += indent + "reg adder_use_valid;\n"
 
     # generate adder
-    code += indent + "reg signed [8:0] adder[%d:0];\n"%(dma_count-1)
-    code += indent + "reg signed [8:0] adder[%d:0];\n"%(dma_count-1)
+    code += indent + "reg signed [8:0] adder1[%d:0];\n"%(dma_count-1)
+    code += indent + "reg signed [8:0] adder2[%d:0];\n"%(dma_count-1)
     code += indent + "reg adder_valid;\n"
 
     # generate fp_temp
@@ -197,21 +197,9 @@ def gen_add(
     code += indent + "reg result_valid;\n"
     code += indent + "reg last_result;\n"
 
-    # generate fp_temp_mult_coe_temp
-    code += indent + "wire signed [95:0] fp_temp1_mult_coe1_temp[%d:0];\n"%(
-        dma_count-1)
-    for i in range(dma_count):
-        code += indent + "assign fp_temp1_mult_coe1_temp[%d] = fp_temp1[%d]" \
-             " * coe1;\n"%(i, i)
-    code += indent + "wire signed [95:0] fp_temp2_mult_coe2_temp[%d:0];\n"%(
-        dma_count-1)
-    for i in range(dma_count):
-        code += indent + "assign fp_temp2_mult_coe2_temp[%d] = fp_temp2[%d]" \
-             " * coe2;\n"%(i, i)
-
     # generate coe
-    code += indent + "wire [47:0] coe1;\n"
-    code += indent + "wire [47:0] coe2;\n"
+    code += indent + "reg [47:0] coe1;\n"
+    code += indent + "reg [47:0] coe2;\n"
     code += indent + "always @(*) begin\n"
     indent = "\t\t"
     code += indent + "case(mux)\n"
@@ -235,11 +223,23 @@ def gen_add(
     indent = "\t"
     code += indent + "end\n"
 
+    # generate fp_temp_mult_coe_temp
+    code += indent + "wire signed [95:0] fp_temp1_mult_coe1_temp[%d:0];\n"%(
+        dma_count-1)
+    for i in range(dma_count):
+        code += indent + "assign fp_temp1_mult_coe1_temp[%d] = fp_temp1[%d]" \
+             " * coe1;\n"%(i, i)
+    code += indent + "wire signed [95:0] fp_temp2_mult_coe2_temp[%d:0];\n"%(
+        dma_count-1)
+    for i in range(dma_count):
+        code += indent + "assign fp_temp2_mult_coe2_temp[%d] = fp_temp2[%d]" \
+             " * coe2;\n"%(i, i)
+
     # generate rshift
-    code += indent + "wire [4:0] rshift1;\n"
-    code += indent + "wire shift_direction1;\n"
-    code += indent + "wire [4:0] rshift2;\n"
-    code += indent + "wire shift_direction2;\n"
+    code += indent + "reg [4:0] rshift1;\n"
+    code += indent + "reg shift_direction1;\n"
+    code += indent + "reg [4:0] rshift2;\n"
+    code += indent + "reg shift_direction2;\n"
     code += indent + "always @(*) begin\n"
     indent = "\t\t"
     code += indent + "case(mux)\n"
@@ -268,8 +268,8 @@ def gen_add(
     code += indent + "end\n"
 
     # generate zero_x
-    code += indent + "wire signed [8:0] zero_x1;\n"
-    code += indent + "wire signed [8:0] zero_x2;\n"
+    code += indent + "reg signed [8:0] zero_x1;\n"
+    code += indent + "reg signed [8:0] zero_x2;\n"
     code += indent + "always @(*) begin\n"
     indent = "\t\t"
     code += indent + "case(mux)\n"
@@ -294,7 +294,7 @@ def gen_add(
     code += indent + "end\n"
 
     # generate zero_y
-    code += indent + "wire signed [31:0] zero_y;\n"
+    code += indent + "reg signed [31:0] zero_y;\n"
     code += indent + "always @(*) begin\n"
     indent = "\t\t"
     code += indent + "case(mux)\n"
@@ -371,7 +371,7 @@ def gen_add(
         code += indent + "adder1[%d] <= adder1_use[%d] - zero_x1;\n"%(i, i)
     for i in range(dma_count):
         code += indent + "adder2[%d] <= adder2_use[%d] - zero_x2;\n"%(i, i)
-    code += indent + "adder_valid <= adder_user_valid;\n"
+    code += indent + "adder_valid <= adder_use_valid;\n"
     # # # fp_temp.assign(temp)
     for i in range(dma_count):
         code += indent + "fp_temp1_sign[%d] <= adder1[%d][8];\n"%(i, i)
@@ -536,7 +536,7 @@ def gen_add(
         code += indent + "t_add_y[%d] = 0;\n"%(i)
     for i in range(dma_count):
         code += indent + "result[%d] = 0;\n"%(i)
-    code += indent + "adder_user_valid = 0;\n"
+    code += indent + "adder_use_valid = 0;\n"
     code += indent + "adder_valid = 0;\n"
     code += indent + "fp_temp_valid = 0;\n"
     code += indent + "fp_temp_mult_coe_valid = 0;\n"

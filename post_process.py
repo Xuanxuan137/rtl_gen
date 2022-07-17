@@ -85,14 +85,14 @@ def gen_post_process(
 
     # 生成zero_y
     for n, z in enumerate(ZERO_Y):
-        code += indent + "parameter [31:0] zero_y%d = %d;\n"%(n, z)
+        code += indent + "parameter signed [31:0] zero_y%d = %d;\n"%(n, z)
 
     # 生成bias
     for n, b in enumerate(BIAS):
-        code += indent + "reg [31:0] bias%d[%d:0];\n"%(n, len(b)-1)
+        code += indent + "reg signed [31:0] bias%d[%d:0];\n"%(n, len(b)-1)
     
     # 生成qmax
-    code += indent + "parameter [31:0] qmax = %d;\n"%(QMAX)
+    code += indent + "parameter signed [31:0] qmax = %d;\n"%(QMAX)
 
     # 生成coe
     code += indent + "reg [47:0] coe;\n"
@@ -125,7 +125,7 @@ def gen_post_process(
     code += indent + "end\n"
 
     # 生成zero_y
-    code += indent + "reg [31:0] zero_y;\n"
+    code += indent + "reg signed [31:0] zero_y;\n"
     code += indent + "always @(*) begin\n"
     indent = "\t\t"
     code += indent + "case(mux)\n"
@@ -140,7 +140,7 @@ def gen_post_process(
     code += indent + "end\n"
 
     # 生成bias
-    code += indent + "reg [31:0] bias;\n"
+    code += indent + "reg signed [31:0] bias;\n"
     code += indent + "always @(*) begin\n"
     indent = "\t\t"
     code += indent + "case(mux)\n"
@@ -172,14 +172,14 @@ def gen_post_process(
     debug_signals.append(["fp_temp", 48, DATA_NUMBER])
 
     # 生成mult_temp
-    code += indent + "wire [95:0] mult_temp[%d:0];\n"%(DATA_NUMBER-1)
+    code += indent + "wire signed [95:0] mult_temp[%d:0];\n"%(DATA_NUMBER-1)
     debug_signals.append(["mult_temp", 96, DATA_NUMBER])
     for i in range(DATA_NUMBER):
         code += indent + "assign mult_temp[%d] = fp_temp[%d] * coe;\n"%(i, i)
 
     # 生成mult
     code += indent + "reg mult_sign[%d:0];\n"%(DATA_NUMBER-1)
-    code += indent + "reg [47:0] mult[%d:0];\n"%(DATA_NUMBER-1)
+    code += indent + "reg signed [47:0] mult[%d:0];\n"%(DATA_NUMBER-1)
     debug_signals.append(["mult_sign", 1, DATA_NUMBER])
     debug_signals.append(["mult", 48, DATA_NUMBER])
 

@@ -500,6 +500,7 @@ def gen_code(
         PP_CHANNEL=pp_channel,
         PP_MUX_WIDTH=pp_mux_width,
         INSTR_ANALYSE_RESULT=instr_analyse_result,
+        CALCULATION_GRAPH=calculation_graph,
     )
     with open("output/fpga_deploy/top.v", "w") as f:
         f.write(main_code)

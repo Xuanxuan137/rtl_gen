@@ -111,7 +111,7 @@ def gen_fc(
     # 生成zero_y
     for n, y in enumerate(ZERO_Y):
         code += indent + "parameter signed [31:0] zero_y%d = %d;\n"%(
-            DATA_WIDTH, y)
+            n, y)
     
     # 生成qmax
     code += indent + "parameter signed [31:0] qmax = %d;\n"%(QMAX)
@@ -191,10 +191,10 @@ def gen_fc(
     code += indent + "reg last;\n"
 
     # 生成valid_pipeline
-    code += indent + "reg [%d:0] valid_pipeline;\n"%(accumulate_time+5)
+    code += indent + "reg [%d:0] valid_pipeline;\n"%(accumulate_time+1)
     
     # 生成last_pipeline
-    code += indent + "reg [%d:0] last_pipeline;\n"%(accumulate_time+9)
+    code += indent + "reg [%d:0] last_pipeline;\n"%(accumulate_time+7)
 
     # 生成channel(用于选择bias)
     bias_len = 0
@@ -277,7 +277,7 @@ def gen_fc(
     code += indent + "end\n"
 
     # 生成zero_x
-    code += indent + "reg [%d:0] zero_x;\n"%(DATA_WIDTH)
+    code += indent + "reg signed [%d:0] zero_x;\n"%(DATA_WIDTH)
     code += indent + "always @(*) begin\n"
     indent = "\t\t"
     code += indent + "case(mux)\n"
@@ -292,7 +292,7 @@ def gen_fc(
     code += indent + "end\n"
 
     # 生成zero_w
-    code += indent + "reg [%d:0] zero_w;\n"%(DATA_WIDTH)
+    code += indent + "reg signed [%d:0] zero_w;\n"%(DATA_WIDTH)
     code += indent + "always @(*) begin\n"
     indent = "\t\t"
     code += indent + "case(mux)\n"
@@ -307,7 +307,7 @@ def gen_fc(
     code += indent + "end\n"
 
     # 生成zero_y
-    code += indent + "reg [31:0] zero_y;\n"
+    code += indent + "reg signed [31:0] zero_y;\n"
     code += indent + "always @(*) begin\n"
     indent = "\t\t"
     code += indent + "case(mux)\n"
@@ -330,9 +330,9 @@ def gen_fc(
     indent = "\t\t"
     code += indent + "last_data_type <= data_type;\n"
     code += indent + "valid_pipeline <= {valid_pipeline[%d:0], " \
-        "in_valid&data_type};\n"%(accumulate_time+4)
+        "in_valid&data_type};\n"%(accumulate_time)
     code += indent + "last_pipeline <= {last_pipeline[%d:0], last};\n"%(
-        accumulate_time+8)
+        accumulate_time+6)
     #   # 生成data_type=0(feature_map数据)
     code += indent + "if(data_type == 0) begin\n"
     indent = "\t\t\t"
